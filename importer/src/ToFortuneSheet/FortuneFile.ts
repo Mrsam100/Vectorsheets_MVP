@@ -42,7 +42,7 @@ export class FortuneFile {
         this.imageList = new ImageList(files);
 
         let numfmts =  this.readXml.getElementsByTagName("numFmt/numFmt", stylesFile);
-        let numFmtDefaultC = JSON.parse(JSON.stringify(numFmtDefault));
+        let numFmtDefaultC = { ...numFmtDefault };
         for(let i=0;i<numfmts.length;i++){
             let attrList = numfmts[i].attributeList;
             let numfmtid = getXmlAttibute(attrList, "numFmtId", "49");
@@ -288,9 +288,6 @@ export class FortuneFile {
 
             cy_n = cy_n + toRowOff - y_n;
 
-            console.log(defaultColWidth, colhidden , columnlen);
-            console.log(fromCol, this.columnWidthSet[fromCol] , fromColOff);
-            console.log(toCol, this.columnWidthSet[toCol] , toColOff, JSON.stringify(this.columnWidthSet));
 
             imageObject.originWidth = cx_n;
             imageObject.originHeight = cy_n;

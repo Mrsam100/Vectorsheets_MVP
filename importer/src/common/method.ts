@@ -384,22 +384,26 @@ function rgbToHsl(r:number, g:number, b:number) {
     return [h, s, l];
 }
  
-export function generateRandomIndex(prefix:string):string {
-    if(prefix == null){
+/**
+ * Generate a random unique index string
+ * Works in both browser and Node.js environments
+ */
+export function generateRandomIndex(prefix: string): string {
+    if (prefix == null) {
         prefix = "Sheet";
     }
 
-    let userAgent = window.navigator.userAgent.replace(/[^a-zA-Z0-9]/g, "").split("");
-
+    // Generate random characters (alphanumeric)
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let mid = "";
 
-    for(let i = 0; i < 5; i++){
-        mid += userAgent[Math.round(Math.random() * (userAgent.length - 1))];
+    for (let i = 0; i < 5; i++) {
+        mid += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    let time = new Date().getTime();
+    const time = Date.now();
 
-    return prefix + "_" + mid + "_" + time;
+    return `${prefix}_${mid}_${time}`;
 }
 
 
