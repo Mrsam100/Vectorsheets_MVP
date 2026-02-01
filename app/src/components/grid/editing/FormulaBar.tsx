@@ -1,0 +1,902 @@
+/**
+ * FormulaBar - Excel-style formula bar above the grid
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │                           FORMULA BAR                                   │
+ * ├─────────────────────────────────────────────────────────────────────────┤
+ * │                                                                         │
+ * │   ┌──────────┬───────────────────────────────────────────────────────┐  │
+ * │   │   A1     │ =SUM(B1:B10) + AVERAGE(C1:C10)                        │  │
+ * │   │ Name Box │              Formula Input                             │  │
+ * │   └──────────┴───────────────────────────────────────────────────────┘  │
+ * │                                                                         │
+ * │   Features:                                                             │
+ * │   - Name box shows current cell address                                 │
+ * │   - Formula input shows/edits cell content                              │
+ * │   - Expands for multiline content                                       │
+ * │   - Function hints and autocomplete                                     │
+ * │   - Syncs with CellEditorOverlay (same EditModeManager)                 │
+ * │                                                                         │
+ * │   When editing:                                                         │
+ * │   - Both FormulaBar and CellEditorOverlay show same content             │
+ * │   - Focus can switch between them                                       │
+ * │   - Changes sync immediately                                            │
+ * │                                                                         │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ */
+
+import React, {
+  useRef,
+  useEffect,
+  useCallback,
+  useState,
+  memo,
+  useLayoutEffect,
+} from 'react';
+import type { EditModeState, EditModeActions } from './useEditMode';
+import { useFormulaAutoComplete } from './useFormulaAutoComplete';
+import type { AcceptResult } from './useFormulaAutoComplete';
+import { FormulaHintsPanel } from './FormulaHintsPanel';
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * Characters that trigger Point mode in formulas (Excel-exact behavior)
+ * Defined at module level to avoid recreation on every render
+ */
+const POINT_MODE_TRIGGERS = new Set([
+  '=', '+', '-', '*', '/', '(', ',', ':', '^', '&', '<', '>', ';'
+]);
+
+/**
+ * Maximum undo history entries during edit
+ */
+const MAX_EDIT_HISTORY = 100;
+
+/**
+ * Debounce delay for adding to undo history (ms)
+ */
+const UNDO_DEBOUNCE_MS = 300;
+
+/**
+ * Style ID for formula bar styles (injected once)
+ */
+const STYLE_ID = 'formula-bar-styles';
+
+/**
+ * Ensure formula bar styles are injected once
+ */
+function ensureStyles(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    .formula-bar-input {
+      caret-color: #1a73e8;
+    }
+
+    .formula-bar-input:focus {
+      outline: none;
+    }
+
+    .formula-bar-input::selection {
+      background-color: rgba(26, 115, 232, 0.3);
+    }
+
+    .formula-bar[data-mode="point"] .formula-bar-input {
+      caret-color: #34a853;
+    }
+
+    .formula-bar[data-mode="point"] .formula-bar-input::selection {
+      background-color: rgba(52, 168, 83, 0.3);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export interface FormulaBarProps {
+  /** Edit state from useEditMode hook */
+  state: EditModeState;
+  /** Edit actions from useEditMode hook */
+  actions: EditModeActions;
+  /** Active cell address for name box */
+  activeCellAddress: string;
+  /** Active cell value (when not editing) */
+  activeCellValue?: string;
+  /** Active cell reference for starting edit */
+  activeCell?: { row: number; col: number } | null;
+  /** Height of the formula bar */
+  height?: number;
+  /** Whether to show expand button for multiline */
+  showExpandButton?: boolean;
+  /** Callback when name box is clicked */
+  onNameBoxClick?: () => void;
+  /** Callback when formula bar receives focus */
+  onFocus?: () => void;
+  /** Callback when Enter is pressed */
+  onEnter?: (shift: boolean) => void;
+  /** Callback when Tab is pressed */
+  onTab?: (shift: boolean) => void;
+  /** Callback when escape pressed and edit cancelled */
+  onCancel?: () => void;
+  /** Function hints to display (legacy - use auto-complete instead) */
+  functionHint?: FunctionHint | null;
+  /** Whether to enable formula auto-complete (default: true) */
+  enableAutoComplete?: boolean;
+}
+
+export interface FunctionHint {
+  /** Function name */
+  name: string;
+  /** Function description */
+  description: string;
+  /** Argument descriptions */
+  arguments: Array<{
+    name: string;
+    description: string;
+    optional?: boolean;
+  }>;
+  /** Currently active argument index */
+  activeArgumentIndex?: number;
+}
+
+/**
+ * Internal history entry for undo/redo during edit
+ */
+interface EditHistoryEntry {
+  value: string;
+  cursorPosition: number;
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Convert column number to letter (0 = A, 1 = B, etc.)
+ */
+function columnToLetter(col: number): string {
+  let result = '';
+  let n = col + 1;
+  while (n > 0) {
+    n--;
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26);
+  }
+  return result;
+}
+
+/**
+ * Format cell reference as A1-style address
+ */
+function formatCellAddress(row: number, col: number): string {
+  return `${columnToLetter(col)}${row + 1}`;
+}
+
+// =============================================================================
+// Hooks
+// =============================================================================
+
+/**
+ * Internal undo/redo history for edit session
+ */
+function useEditHistory(initialValue: string, enabled: boolean) {
+  const [history, setHistory] = useState<EditHistoryEntry[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const lastValueRef = useRef(initialValue);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Use refs to avoid stale closures in callbacks
+  const historyRef = useRef(history);
+  const historyIndexRef = useRef(historyIndex);
+  historyRef.current = history;
+  historyIndexRef.current = historyIndex;
+
+  // Reset history when editing starts
+  useEffect(() => {
+    if (enabled) {
+      const initialEntry = {
+        value: initialValue,
+        cursorPosition: initialValue.length,
+      };
+      setHistory([initialEntry]);
+      setHistoryIndex(0);
+      lastValueRef.current = initialValue;
+      historyRef.current = [initialEntry];
+      historyIndexRef.current = 0;
+    }
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, [enabled, initialValue]);
+
+  const pushHistory = useCallback((entry: EditHistoryEntry) => {
+    if (!enabled) return;
+
+    // Debounce rapid changes
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+
+      // Skip if value unchanged
+      if (entry.value === lastValueRef.current) return;
+      lastValueRef.current = entry.value;
+
+      // Use refs to get current values (avoid stale closure)
+      const currentIndex = historyIndexRef.current;
+
+      setHistory((prev) => {
+        // Truncate future history if we're not at the end
+        const newHistory = prev.slice(0, currentIndex + 1);
+        newHistory.push(entry);
+
+        // Limit history size
+        if (newHistory.length > MAX_EDIT_HISTORY) {
+          newHistory.shift();
+        }
+
+        historyRef.current = newHistory;
+        return newHistory;
+      });
+      setHistoryIndex((prev) => {
+        const newIndex = Math.min(prev + 1, MAX_EDIT_HISTORY - 1);
+        historyIndexRef.current = newIndex;
+        return newIndex;
+      });
+    }, UNDO_DEBOUNCE_MS);
+  }, [enabled]);
+
+  const undo = useCallback((): EditHistoryEntry | null => {
+    const currentIndex = historyIndexRef.current;
+    const currentHistory = historyRef.current;
+
+    if (!enabled || currentIndex <= 0) return null;
+
+    const newIndex = currentIndex - 1;
+    const entry = currentHistory[newIndex];
+    if (!entry) return null; // Safety check
+
+    setHistoryIndex(newIndex);
+    historyIndexRef.current = newIndex;
+    lastValueRef.current = entry.value;
+    return entry;
+  }, [enabled]);
+
+  const redo = useCallback((): EditHistoryEntry | null => {
+    const currentIndex = historyIndexRef.current;
+    const currentHistory = historyRef.current;
+
+    if (!enabled || currentIndex >= currentHistory.length - 1) return null;
+
+    const newIndex = currentIndex + 1;
+    const entry = currentHistory[newIndex];
+    if (!entry) return null; // Safety check
+
+    setHistoryIndex(newIndex);
+    historyIndexRef.current = newIndex;
+    lastValueRef.current = entry.value;
+    return entry;
+  }, [enabled]);
+
+  return {
+    pushHistory,
+    undo,
+    redo,
+    canUndo: historyIndex > 0,
+    canRedo: historyIndex < history.length - 1
+  };
+}
+
+// =============================================================================
+// Sub-Components
+// =============================================================================
+
+/**
+ * Name Box - Shows current cell address
+ */
+const NameBox: React.FC<{
+  address: string;
+  onClick?: () => void;
+}> = memo(({ address, onClick }) => (
+  <div
+    className="formula-bar-namebox"
+    onClick={onClick}
+    style={{
+      width: 60,
+      minWidth: 60,
+      height: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRight: '1px solid var(--color-border-primary, #e2e8f0)',
+      fontFamily: 'var(--font-family-ui, sans-serif)',
+      fontSize: '12px',
+      fontWeight: 500,
+      color: 'var(--color-text-primary, #1e293b)',
+      backgroundColor: 'var(--color-bg-secondary, #f8fafc)',
+      cursor: 'pointer',
+      userSelect: 'none',
+    }}
+  >
+    {address}
+  </div>
+));
+
+NameBox.displayName = 'NameBox';
+
+/**
+ * Function Hint Tooltip
+ */
+const FunctionHintTooltip: React.FC<{
+  hint: FunctionHint;
+}> = memo(({ hint }) => (
+  <div
+    className="formula-bar-function-hint"
+    style={{
+      position: 'absolute',
+      top: '100%',
+      left: 60,
+      marginTop: 4,
+      padding: '8px 12px',
+      backgroundColor: 'white',
+      border: '1px solid var(--color-border-primary, #e2e8f0)',
+      borderRadius: 4,
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+      zIndex: 1000,
+      maxWidth: 400,
+      fontFamily: 'var(--font-family-ui, sans-serif)',
+      fontSize: '12px',
+    }}
+  >
+    {/* Function signature */}
+    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+      <span style={{ color: '#1a73e8' }}>{hint.name}</span>
+      <span style={{ color: '#5f6368' }}>(</span>
+      {hint.arguments.map((arg, i) => (
+        <span key={arg.name}>
+          {i > 0 && <span style={{ color: '#5f6368' }}>, </span>}
+          <span
+            style={{
+              color: i === hint.activeArgumentIndex ? '#1a73e8' : '#5f6368',
+              fontWeight: i === hint.activeArgumentIndex ? 600 : 400,
+              textDecoration: arg.optional ? 'underline dotted' : 'none',
+            }}
+          >
+            {arg.name}
+          </span>
+        </span>
+      ))}
+      <span style={{ color: '#5f6368' }}>)</span>
+    </div>
+
+    {/* Function description */}
+    <div style={{ color: '#5f6368', marginBottom: 4 }}>
+      {hint.description}
+    </div>
+
+    {/* Active argument description */}
+    {hint.activeArgumentIndex !== undefined && hint.arguments[hint.activeArgumentIndex] && (
+      <div style={{ color: '#1a73e8', fontStyle: 'italic' }}>
+        {hint.arguments[hint.activeArgumentIndex].name}:{' '}
+        {hint.arguments[hint.activeArgumentIndex].description}
+      </div>
+    )}
+  </div>
+));
+
+FunctionHintTooltip.displayName = 'FunctionHintTooltip';
+
+// =============================================================================
+// Main Component
+// =============================================================================
+
+/**
+ * FormulaBar - Formula input bar with name box
+ *
+ * Usage:
+ * ```tsx
+ * const { state, actions } = useEditMode({ ... });
+ *
+ * <FormulaBar
+ *   state={state}
+ *   actions={actions}
+ *   activeCellAddress={formatCellAddress(activeRow, activeCol)}
+ *   activeCellValue={getCellDisplayValue(activeRow, activeCol)}
+ *   onEnter={(shift) => navigate(shift ? 'up' : 'down')}
+ * />
+ * ```
+ */
+export const FormulaBar: React.FC<FormulaBarProps> = memo(({
+  state,
+  actions,
+  activeCellAddress,
+  activeCellValue = '',
+  activeCell,
+  height = 28,
+  showExpandButton = false,
+  onNameBoxClick,
+  onFocus,
+  onEnter,
+  onTab,
+  onCancel,
+  functionHint,
+  enableAutoComplete = true,
+}) => {
+  // Ensure styles are injected
+  useLayoutEffect(() => {
+    ensureStyles();
+  }, []);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+
+  // Internal undo/redo history
+  const { pushHistory, undo, redo, canUndo, canRedo } = useEditHistory(
+    state.value,
+    state.isEditing
+  );
+
+  // Formula auto-complete hook
+  const handleAutoCompleteAccept = useCallback((result: AcceptResult) => {
+    // Replace the current token with the accepted suggestion
+    const currentValue = state.value;
+    const newValue =
+      currentValue.slice(0, result.replaceStart) +
+      result.insertText +
+      currentValue.slice(result.replaceStart + result.replaceLength);
+
+    actions.setValue(newValue);
+    actions.setCursorPosition(result.replaceStart + result.cursorOffset);
+  }, [state.value, actions]);
+
+  const {
+    state: autoCompleteState,
+    actions: autoCompleteActions,
+  } = useFormulaAutoComplete({
+    formula: state.value,
+    cursorPosition: state.cursorPosition,
+    enabled: enableAutoComplete && state.isEditing && state.isFormula && isFocused,
+    debounceMs: 50,
+    onAccept: handleAutoCompleteAccept,
+  });
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Display value: editing value or cell value
+  const displayValue = state.isEditing ? state.value : activeCellValue;
+
+  // Track if we've synced selection after focus to avoid re-running on cursor changes
+  const hasSyncedSelectionRef = useRef(false);
+
+  // Sync selection when focus comes to formula bar
+  // Note: Only run when isFocused or isEditing changes, NOT on cursor/selection changes
+  // This prevents fighting with user input and flickering
+  useEffect(() => {
+    if (isFocused && state.isEditing && inputRef.current) {
+      // Only sync selection once when focus arrives
+      if (!hasSyncedSelectionRef.current) {
+        hasSyncedSelectionRef.current = true;
+        if (state.textSelection) {
+          inputRef.current.setSelectionRange(
+            state.textSelection.start,
+            state.textSelection.end
+          );
+        } else {
+          inputRef.current.setSelectionRange(
+            state.cursorPosition,
+            state.cursorPosition
+          );
+        }
+      }
+    } else {
+      // Reset when focus leaves or editing ends
+      hasSyncedSelectionRef.current = false;
+    }
+  }, [isFocused, state.isEditing]); // Intentionally exclude cursor/selection to avoid re-running
+
+  // Handle input change with Point mode trigger detection
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isComposing) return;
+
+    const newValue = e.target.value;
+    const oldValue = state.value;
+    const cursorPos = e.target.selectionStart ?? newValue.length;
+
+    actions.setValue(newValue);
+
+    // Push to undo history
+    pushHistory({
+      value: newValue,
+      cursorPosition: cursorPos,
+    });
+
+    // Check for Point mode trigger (operator typed in a formula)
+    if (
+      newValue.startsWith('=') &&
+      newValue.length > oldValue.length &&
+      state.mode === 'edit' &&
+      cursorPos > 0
+    ) {
+      const addedChar = newValue[cursorPos - 1];
+
+      if (addedChar !== undefined && POINT_MODE_TRIGGERS.has(addedChar)) {
+        actions.setMode('point');
+      }
+    }
+  }, [actions, isComposing, state.value, state.mode, pushHistory]);
+
+  // Handle focus
+  const handleFocus = useCallback(() => {
+    setIsFocused(true);
+    actions.setFormulaBarFocused(true);
+
+    // If not editing but have an active cell, start editing
+    if (!state.isEditing && activeCell) {
+      actions.startEditing(activeCell, activeCellValue);
+    }
+
+    onFocus?.();
+  }, [state.isEditing, activeCell, actions, activeCellValue, onFocus]);
+
+  // Handle blur
+  const handleBlur = useCallback((e: React.FocusEvent) => {
+    setIsFocused(false);
+    actions.setFormulaBarFocused(false);
+
+    // Check if focus moved to cell editor or another edit component
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+    if (relatedTarget?.dataset?.editComponent || relatedTarget?.dataset?.cellEditor) {
+      return;
+    }
+
+    // If clicking outside, confirm edit after small delay
+    // to allow click handling on other elements
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current);
+    }
+    blurTimeoutRef.current = setTimeout(() => {
+      blurTimeoutRef.current = null;
+      if (!document.activeElement?.closest('[data-edit-component]') &&
+          !document.activeElement?.closest('[data-cell-editor]')) {
+        if (state.isEditing) {
+          actions.confirmEdit();
+        }
+      }
+    }, 0);
+  }, [actions, state.isEditing]);
+
+  // Handle composition events (IME)
+  const handleCompositionStart = useCallback(() => {
+    setIsComposing(true);
+  }, []);
+
+  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLInputElement>) => {
+    setIsComposing(false);
+    const value = (e.target as HTMLInputElement).value;
+    const cursorPos = (e.target as HTMLInputElement).selectionStart ?? value.length;
+    actions.setValue(value);
+    pushHistory({
+      value,
+      cursorPosition: cursorPos,
+    });
+  }, [actions, pushHistory]);
+
+  // Handle key events
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isComposing) return;
+
+    // Handle auto-complete navigation first when suggestions are visible
+    if (autoCompleteState.showSuggestions) {
+      switch (e.key) {
+        case 'ArrowUp':
+          e.preventDefault();
+          autoCompleteActions.selectPrevious();
+          return;
+
+        case 'ArrowDown':
+          e.preventDefault();
+          autoCompleteActions.selectNext();
+          return;
+
+        case 'Tab':
+        case 'Enter': {
+          // Accept the selected suggestion
+          const accepted = autoCompleteActions.acceptSuggestion();
+          if (accepted) {
+            e.preventDefault();
+            return;
+          }
+          // If no suggestion accepted, fall through to normal behavior
+          break;
+        }
+
+        case 'Escape':
+          e.preventDefault();
+          autoCompleteActions.dismiss();
+          return;
+      }
+    }
+
+    switch (e.key) {
+      case 'Enter':
+        e.preventDefault();
+        if (state.isEditing) {
+          actions.confirmEdit();
+          onEnter?.(e.shiftKey);
+        }
+        break;
+
+      case 'Tab':
+        e.preventDefault();
+        if (state.isEditing) {
+          actions.confirmEdit();
+          onTab?.(e.shiftKey);
+        }
+        break;
+
+      case 'Escape':
+        e.preventDefault();
+        if (state.isEditing) {
+          actions.cancelEdit();
+          onCancel?.();
+        }
+        break;
+
+      case 'F2':
+        e.preventDefault();
+        if (state.isEditing) {
+          actions.cycleMode();
+        }
+        break;
+
+      case 'a':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          actions.selectAll();
+        }
+        break;
+
+      case 'z':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Ctrl+Shift+Z = Redo
+            if (canRedo) {
+              const entry = redo();
+              if (entry) {
+                actions.setValue(entry.value);
+                actions.setCursorPosition(entry.cursorPosition);
+              }
+            }
+          } else {
+            // Ctrl+Z = Undo
+            if (canUndo) {
+              const entry = undo();
+              if (entry) {
+                actions.setValue(entry.value);
+                actions.setCursorPosition(entry.cursorPosition);
+              }
+            }
+          }
+        }
+        break;
+
+      case 'y':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (canRedo) {
+            const entry = redo();
+            if (entry) {
+              actions.setValue(entry.value);
+              actions.setCursorPosition(entry.cursorPosition);
+            }
+          }
+        }
+        break;
+    }
+  }, [state.isEditing, actions, isComposing, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, canUndo, canRedo, undo, redo]);
+
+  // Sync selection changes from native input
+  const handleSelect = useCallback(() => {
+    const input = inputRef.current;
+    if (!input || isComposing || !state.isEditing) return;
+
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+
+    if (start !== end) {
+      actions.setTextSelection(start, end);
+    } else {
+      actions.setCursorPosition(start);
+    }
+  }, [actions, isComposing, state.isEditing]);
+
+  // Handle expand toggle
+  const handleExpandToggle = useCallback(() => {
+    setIsExpanded(!isExpanded);
+  }, [isExpanded]);
+
+  // Container styles
+  const containerStyle: React.CSSProperties = {
+    height: isExpanded ? 'auto' : height,
+    minHeight: height,
+    display: 'flex',
+    alignItems: 'stretch',
+    borderBottom: '1px solid var(--color-border-primary, #e2e8f0)',
+    backgroundColor: 'var(--color-bg-primary, #ffffff)',
+    position: 'relative',
+  };
+
+  // Input container styles
+  const inputContainerStyle: React.CSSProperties = {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px',
+    position: 'relative',
+  };
+
+  // Input styles
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    height: isExpanded ? 'auto' : '100%',
+    minHeight: isExpanded ? 60 : 'auto',
+    border: 'none',
+    outline: 'none',
+    fontFamily: 'var(--font-family-cell, Arial, sans-serif)',
+    fontSize: '12px',
+    color: 'var(--color-text-primary, #1e293b)',
+    backgroundColor: 'transparent',
+    resize: isExpanded ? 'vertical' : 'none',
+  };
+
+  // Mode indicator color
+  const getModeIndicatorColor = () => {
+    if (!state.isEditing) return 'transparent';
+    switch (state.mode) {
+      case 'edit': return '#1a73e8';
+      case 'enter': return '#fbbc04';
+      case 'point': return '#34a853';
+      default: return 'transparent';
+    }
+  };
+
+  return (
+    <div
+      className="formula-bar"
+      style={containerStyle}
+      data-edit-component="formula-bar"
+      data-mode={state.isEditing ? state.mode : undefined}
+    >
+      {/* Name Box */}
+      <NameBox address={activeCellAddress} onClick={onNameBoxClick} />
+
+      {/* Function button (fx) */}
+      <div
+        className="formula-bar-fx"
+        style={{
+          width: 24,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRight: '1px solid var(--color-border-primary, #e2e8f0)',
+          fontStyle: 'italic',
+          fontWeight: 600,
+          fontSize: '11px',
+          color: 'var(--color-text-secondary, #64748b)',
+          cursor: 'pointer',
+        }}
+        title="Insert function"
+      >
+        fx
+      </div>
+
+      {/* Mode indicator bar */}
+      <div
+        className="formula-bar-mode-indicator"
+        style={{
+          width: 3,
+          backgroundColor: getModeIndicatorColor(),
+          transition: 'background-color 150ms ease',
+        }}
+      />
+
+      {/* Input container */}
+      <div style={inputContainerStyle}>
+        <input
+          ref={inputRef}
+          type="text"
+          className="formula-bar-input"
+          value={displayValue}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onSelect={handleSelect}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          placeholder={state.isEditing ? '' : 'Select a cell to see its value'}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-cell-editor="true"
+          data-edit-component="formula-bar-input"
+          aria-label="Formula bar"
+          style={inputStyle}
+        />
+
+        {/* Expand button */}
+        {showExpandButton && (
+          <button
+            className="formula-bar-expand"
+            onClick={handleExpandToggle}
+            style={{
+              width: 20,
+              height: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: 'none',
+              background: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-secondary, #64748b)',
+              fontSize: '10px',
+            }}
+            title={isExpanded ? 'Collapse formula bar' : 'Expand formula bar'}
+          >
+            {isExpanded ? '▲' : '▼'}
+          </button>
+        )}
+      </div>
+
+      {/* Legacy function hint tooltip (kept for backwards compatibility) */}
+      {functionHint && state.isEditing && state.isFormula && !enableAutoComplete && (
+        <FunctionHintTooltip hint={functionHint} />
+      )}
+
+      {/* Formula auto-complete hints panel */}
+      {enableAutoComplete && state.isEditing && state.isFormula && isFocused && (
+        <FormulaHintsPanel
+          state={autoCompleteState}
+          actions={autoCompleteActions}
+          position={{ x: 85, y: height + 4 }}
+          zIndex={1000}
+        />
+      )}
+    </div>
+  );
+});
+
+FormulaBar.displayName = 'FormulaBar';
+
+// =============================================================================
+// Exports
+// =============================================================================
+
+export { formatCellAddress, columnToLetter };
+export default FormulaBar;

@@ -38,7 +38,8 @@
     "index.ts",
     "core/**/*.ts",
     "react/**/*.ts",
-    "react/**/*.tsx"
+    "react/**/*.tsx",
+    "harness/**/*.ts"
   ],
   "exclude": [
     "node_modules",

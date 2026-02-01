@@ -28,7 +28,7 @@ import {
   createSimpleEvaluator,
 } from './formula/FormulaEngine.js';
 import { VirtualRenderer } from './rendering/VirtualRenderer.js';
-import { NavigationManager } from './navigation/NavigationManager.js';
+import { NavigationManager, createDataProviderAdapter } from './navigation/NavigationManager.js';
 import { SelectionManager } from './selection/SelectionManager.js';
 import {
   KeyboardHandler,
@@ -143,14 +143,16 @@ export class SpreadsheetEngine {
     // Initialize selection manager
     this.selectionManager = new SelectionManager(this.dataStore);
 
-    // Initialize navigation manager
+    // Initialize navigation manager with data provider adapter
+    const navigationDataProvider = createDataProviderAdapter(this.dataStore);
     this.navigationManager = new NavigationManager(
-      this.dataStore,
-      this.virtualRenderer
+      navigationDataProvider,
+      {},  // Use default config
+      this.selectionManager
     );
 
-    // Initialize keyboard handler
-    this.keyboardHandler = new KeyboardHandler(
+    // Initialize keyboard handler with legacy compatibility
+    this.keyboardHandler = KeyboardHandler.createLegacy(
       this.navigationManager,
       this.selectionManager
     );
@@ -173,7 +175,7 @@ export class SpreadsheetEngine {
         this.events.onEndEdit?.(confirm);
       },
       onSelectionChange: (selection) => {
-        this.events.onSelectionChange?.(selection);
+        this.events.onSelectionChange?.(selection as Selection);
       },
       onDelete: () => {
         this.deleteSelection();

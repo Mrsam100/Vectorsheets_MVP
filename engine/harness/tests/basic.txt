@@ -1,0 +1,123 @@
+# VectorSheet Harness - Basic Functionality Test
+# This script tests core spreadsheet operations
+
+# =============================================================================
+# Cell Operations
+# =============================================================================
+
+ECHO === Testing Cell Operations ===
+
+# Set numeric values
+SET A1 100
+SET A2 200
+SET A3 300
+
+# Verify values
+GET A1
+GET A2
+GET A3
+
+# Set formula
+SET A4 =A1+A2+A3
+GET A4
+
+# Set string value
+SET B1 "Hello World"
+GET B1
+
+# Set quoted string with spaces
+SET B2 "Multi word string"
+GET B2
+
+# Delete cell
+DELETE A3
+GET A3
+
+# =============================================================================
+# Range Operations
+# =============================================================================
+
+ECHO === Testing Range Operations ===
+
+# Set up a range
+SET C1 10
+SET C2 20
+SET C3 30
+SET D1 40
+SET D2 50
+SET D3 60
+
+# Get range
+GET_RANGE C1:D3
+
+# Clear range
+CLEAR C1:D3
+GET_RANGE C1:D3
+
+# =============================================================================
+# Assertions
+# =============================================================================
+
+ECHO === Testing Assertions ===
+
+SET E1 100
+ASSERT E1 == 100
+ASSERT E1 != 50
+ASSERT E1 > 50
+ASSERT E1 >= 100
+ASSERT E1 < 200
+ASSERT E1 <= 100
+
+SET E2 "test"
+ASSERT E2 == "test"
+
+# Formula result assertion
+SET F1 10
+SET F2 20
+SET F3 =F1+F2
+ASSERT F3 == 30
+
+# =============================================================================
+# Undo/Redo
+# =============================================================================
+
+ECHO === Testing Undo/Redo ===
+
+SET G1 "original"
+GET G1
+SET G1 "modified"
+GET G1
+UNDO
+GET G1
+REDO
+GET G1
+
+# =============================================================================
+# State Inspection
+# =============================================================================
+
+ECHO === Testing State Inspection ===
+
+STATS
+SNAPSHOT
+
+# =============================================================================
+# Dump
+# =============================================================================
+
+ECHO === Testing Dump ===
+
+SET H1 "Name"
+SET I1 "Value"
+SET H2 "Alpha"
+SET I2 100
+SET H3 "Beta"
+SET I3 200
+
+DUMP H1:I3
+
+# =============================================================================
+# Complete
+# =============================================================================
+
+ECHO === All Basic Tests Complete ===

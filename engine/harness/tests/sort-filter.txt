@@ -1,0 +1,65 @@
+# VectorSheet Harness - Sort/Filter Test
+# This script tests sorting and filtering operations
+
+# =============================================================================
+# Setup Test Data
+# =============================================================================
+
+ECHO === Setting Up Test Data ===
+
+# Headers
+SET A1 "Name"
+SET B1 "Score"
+SET C1 "Grade"
+
+# Data rows
+SET A2 "Charlie"
+SET B2 85
+SET C2 "B"
+
+SET A3 "Alice"
+SET B3 95
+SET C3 "A"
+
+SET A4 "Bob"
+SET B4 78
+SET C4 "C"
+
+SET A5 "Diana"
+SET B5 92
+SET C5 "A"
+
+SET A6 "Eve"
+SET B6 85
+SET C6 "B"
+
+ECHO Initial data:
+DUMP A1:C6
+
+# =============================================================================
+# Sort Operations
+# =============================================================================
+
+ECHO === Testing Sort ===
+
+# Sort by name ascending
+SORT A1:C6 col=0 order=asc hasHeader=true
+ECHO After sorting by name (asc):
+DUMP A1:C6
+
+# Sort by score descending
+SORT A1:C6 col=1 order=desc hasHeader=true
+ECHO After sorting by score (desc):
+DUMP A1:C6
+
+# Multi-column sort: Grade asc, then Score desc
+# (Students with same grade sorted by score)
+SORT A1:C6 col=2 order=asc hasHeader=true
+ECHO After sorting by grade (asc):
+DUMP A1:C6
+
+# =============================================================================
+# Complete
+# =============================================================================
+
+ECHO === Sort/Filter Tests Complete ===

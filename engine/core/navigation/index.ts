@@ -2,13 +2,72 @@
  * VectorSheet Engine - Navigation Module Exports
  */
 
-export { NavigationManager } from './NavigationManager.js';
-export type {
-  NavigationOptions,
+// NavigationManager
+export {
+  NavigationManager,
+  createNavigationManager,
+  createDataProviderAdapter,
 } from './NavigationManager.js';
 
-export { KeyboardHandler } from './KeyboardHandler.js';
 export type {
-  KeyboardEvent as SpreadsheetKeyboardEvent,
-  KeyboardHandlerCallbacks,
+  NavigationDataProvider,
+  NavigationAction,
+  NavigationConfig,
+  MoveOptions,
+  JumpOptions,
+  NavigationResult,
+  NavigationEvents,
+} from './NavigationManager.js';
+
+// KeyboardHandler
+export {
+  KeyboardHandler,
+  createKeyboardHandler,
+  createIntentDispatcher,
+  getModifiers,
 } from './KeyboardHandler.js';
+
+export type {
+  // Event interfaces
+  KeyboardEvent,
+  MouseEvent,
+
+  // Intent types
+  BaseIntent,
+  NavigateIntent,
+  PageIntent,
+  HomeEndIntent,
+  TabEnterIntent,
+  GoToIntent,
+  SelectionIntent,
+  CellClickIntent,
+  EditIntent,
+  ClipboardIntent,
+  HistoryIntent,
+  DeleteIntent,
+  FormatIntent,
+  DialogIntent,
+  FileIntent,
+  EscapeIntent,
+  UnknownIntent,
+  SpreadsheetIntent,
+  IntentType,
+
+  // Configuration types
+  ModifierState,
+  KeyCombo,
+  Keybinding,
+  KeyboardHandlerConfig,
+
+  // Listener types
+  IntentListener,
+  TypedIntentListener,
+
+  // Legacy compatibility
+  KeyboardHandlerCallbacks,
+  LegacyNavigationAdapter,
+  LegacySelectionAdapter,
+} from './KeyboardHandler.js';
+
+// Re-export SpreadsheetKeyboardEvent for backward compatibility
+export type { KeyboardEvent as SpreadsheetKeyboardEvent } from './KeyboardHandler.js';

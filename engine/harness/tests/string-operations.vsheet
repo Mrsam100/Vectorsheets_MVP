@@ -1,0 +1,18 @@
+# String Operations Test
+# Tests string handling and formulas
+
+# Set up string values
+SET A1 "Hello"
+SET A2 "World"
+
+# Test CONCAT formula
+SET A3 =CONCAT(A1," ",A2)
+
+# Verify
+GET A3
+
+# Test numbers as strings
+SET B1 "123"
+SET B2 456
+
+ECHO "String operations tests completed!"

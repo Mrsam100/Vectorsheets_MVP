@@ -1,0 +1,464 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   CSS Variables - Design Tokens
+   ============================================================================= */
+
+:root {
+  /* Colors - Light Mode */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-tertiary: #f1f5f9;
+  --color-bg-hover: #e2e8f0;
+
+  --color-border-primary: #e2e8f0;
+  --color-border-secondary: #cbd5e1;
+  --color-border-focus: #1a73e8;
+
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
+
+  --color-accent: #1a73e8;
+  --color-accent-hover: #1557b0;
+  --color-accent-light: rgba(26, 115, 232, 0.1);
+
+  /* Grid Colors */
+  --color-grid-line: #e2e8f0;
+  --color-grid-header-bg: #f8fafc;
+  --color-grid-header-border: #cbd5e1;
+  --color-grid-cell-bg: #ffffff;
+  --color-grid-cell-selected: rgba(26, 115, 232, 0.08);
+  --color-grid-selection-border: #1a73e8;
+
+  /* Sizing */
+  --topbar-height: 40px;
+  --formula-bar-height: 28px;
+  --statusbar-height: 24px;
+  --row-header-width: 46px;
+  --col-header-height: 24px;
+  --default-cell-width: 100px;
+  --default-cell-height: 24px;
+
+  /* Typography */
+  --font-family-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  --font-family-cell: Arial, sans-serif;
+  --font-family-mono: Consolas, Monaco, 'Courier New', monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+
+  /* Transitions */
+  --transition-fast: 100ms ease;
+  --transition-normal: 150ms ease;
+  --transition-slow: 200ms ease;
+}
+
+/* =============================================================================
+   Base Styles
+   ============================================================================= */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* =============================================================================
+   Utility Classes
+   ============================================================================= */
+
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-secondary) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-secondary);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-muted);
+}
+
+/* =============================================================================
+   Component Styles
+   ============================================================================= */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 4px;
+  transition: all 150ms ease;
+}
+
+.btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4);
+}
+
+.btn-primary {
+  background-color: #1d4ed8;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #1e40af;
+}
+
+.btn-secondary {
+  background-color: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-secondary:hover {
+  background-color: #e5e7eb;
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: #4b5563;
+}
+
+.btn-ghost:hover {
+  background-color: #f3f4f6;
+}
+
+.icon-btn {
+  padding: 6px;
+  border-radius: 4px;
+  transition: background-color 150ms ease;
+}
+
+.icon-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.icon-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4);
+}
+
+/* =============================================================================
+   Grid Styles - Excel-like Professional Look
+   ============================================================================= */
+
+.grid-viewport {
+  font-family: var(--font-family-cell);
+  background-color: var(--color-grid-cell-bg);
+  /* Prevent text selection during drag operations */
+  user-select: none;
+}
+
+/* -----------------------------------------------------------------------------
+   Header Containers
+   ----------------------------------------------------------------------------- */
+
+.column-headers,
+.row-headers {
+  background-color: var(--color-grid-header-bg);
+  /* Subtle gradient for depth */
+  background-image: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.02) 100%
+  );
+}
+
+/* -----------------------------------------------------------------------------
+   Individual Header Cells
+   ----------------------------------------------------------------------------- */
+
+.column-header,
+.row-header {
+  font-family: var(--font-family-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--color-text-secondary);
+  background-color: var(--color-grid-header-bg);
+  border-color: var(--color-border-primary);
+  /* Smooth transitions */
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.column-header:hover,
+.row-header:hover {
+  background-color: #e8eaed;
+  color: var(--color-text-primary);
+}
+
+/* Selected header state */
+.column-header[aria-selected="true"],
+.row-header[aria-selected="true"] {
+  background-color: #d3e3fd;
+  color: #1967d2;
+  border-color: #aecbfa;
+}
+
+/* -----------------------------------------------------------------------------
+   Corner Cell (Select All)
+   ----------------------------------------------------------------------------- */
+
+.corner-cell {
+  background-color: var(--color-grid-header-bg);
+  border-color: var(--color-grid-header-border);
+  /* Match header gradient */
+  background-image: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.02) 100%
+  );
+}
+
+.corner-cell:hover {
+  background-color: #e8eaed;
+}
+
+.corner-cell:active {
+  background-color: #d3e3fd;
+}
+
+/* -----------------------------------------------------------------------------
+   Resize Handles
+   ----------------------------------------------------------------------------- */
+
+.resize-handle {
+  opacity: 0;
+  transition: opacity 150ms ease, background-color 150ms ease;
+}
+
+.column-header:hover .resize-handle,
+.row-header:hover .resize-handle {
+  opacity: 1;
+}
+
+.resize-handle:hover {
+  background-color: var(--color-accent) !important;
+  opacity: 1;
+}
+
+/* Active resize state */
+.resize-handle:active {
+  background-color: var(--color-accent-hover) !important;
+}
+
+/* -----------------------------------------------------------------------------
+   Grid Cells
+   ----------------------------------------------------------------------------- */
+
+.cell {
+  font-family: var(--font-family-cell);
+  font-size: 12px;
+  line-height: 1.2;
+  background-color: var(--color-grid-cell-bg);
+  border-color: var(--color-grid-line);
+  /* Prevent layout shift */
+  box-sizing: border-box;
+}
+
+/* Hover state - subtle highlight */
+.cell:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* -----------------------------------------------------------------------------
+   Active Cell Border
+   ----------------------------------------------------------------------------- */
+
+.active-cell-border {
+  border-color: var(--color-grid-selection-border);
+  /* Double border effect like Excel */
+  box-shadow:
+    0 0 0 1px var(--color-grid-selection-border),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
+/* Fill handle (bottom-right corner) */
+.active-cell-border > div {
+  background-color: var(--color-accent);
+  border: 1px solid white;
+  pointer-events: auto;
+}
+
+.active-cell-border > div:hover {
+  transform: scale(1.2);
+  cursor: crosshair;
+}
+
+/* -----------------------------------------------------------------------------
+   Selection Overlay
+   ----------------------------------------------------------------------------- */
+
+.selection-overlay {
+  /* Container styles */
+  pointer-events: none;
+  /* Force GPU layer for smooth compositing */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Selection rectangles - base styles */
+.selection-rect {
+  /* GPU acceleration */
+  backface-visibility: hidden;
+  /* Smooth color transitions without affecting transform */
+  transition: background-color 50ms ease-out, border-color 50ms ease-out;
+}
+
+/* Primary selection rectangle (most recent selection) */
+.selection-rect-primary {
+  background-color: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+}
+
+/* Secondary selection rectangles (multi-select with Ctrl+click) */
+.selection-rect-secondary {
+  background-color: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+/* Active cell border - Excel-style blue outline */
+.active-cell-border {
+  /* GPU acceleration */
+  backface-visibility: hidden;
+  /* Crisp border rendering */
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Fill handle - square in bottom-right corner */
+.fill-handle {
+  background-color: #2563eb;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  /* GPU acceleration for smooth hover */
+  backface-visibility: hidden;
+}
+
+.fill-handle:hover {
+  background-color: #1d4ed8;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.fill-handle:active {
+  background-color: #1e40af;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* Marching ants animation for copy/cut indication */
+@keyframes marching-ants {
+  0% {
+    background-position: 0 0, 100% 0, 100% 100%, 0 100%;
+  }
+  100% {
+    background-position: 20px 0, 100% 20px, calc(100% - 20px) 100%, 0 calc(100% - 20px);
+  }
+}
+
+.marching-ants {
+  background-image:
+    linear-gradient(90deg, #2563eb 50%, transparent 50%),
+    linear-gradient(180deg, #2563eb 50%, transparent 50%),
+    linear-gradient(90deg, #2563eb 50%, transparent 50%),
+    linear-gradient(180deg, #2563eb 50%, transparent 50%);
+  background-size: 10px 2px, 2px 10px, 10px 2px, 2px 10px;
+  background-position: 0 0, 100% 0, 100% 100%, 0 100%;
+  background-repeat: repeat-x, repeat-y, repeat-x, repeat-y;
+  animation: marching-ants 0.4s linear infinite;
+  border: none !important;
+}
+
+/* -----------------------------------------------------------------------------
+   Freeze Pane Lines
+   ----------------------------------------------------------------------------- */
+
+.freeze-line-vertical {
+  background-color: #9aa0a6;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.15);
+}
+
+.freeze-line-horizontal {
+  background-color: #9aa0a6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* -----------------------------------------------------------------------------
+   Grid Lines (Background Pattern)
+   ----------------------------------------------------------------------------- */
+
+.grid-lines {
+  background-image:
+    linear-gradient(to right, var(--color-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid-line) 1px, transparent 1px);
+  background-size: var(--default-cell-width) var(--default-cell-height);
+  pointer-events: none;
+}
+
+/* -----------------------------------------------------------------------------
+   Validation Error Indicator
+   ----------------------------------------------------------------------------- */
+
+.cell[title]:not([title=""]) {
+  position: relative;
+}
+
+/* Red triangle in corner for validation errors - handled in component */
+
+/* -----------------------------------------------------------------------------
+   Data Bar (Conditional Formatting)
+   ----------------------------------------------------------------------------- */
+
+.data-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+}

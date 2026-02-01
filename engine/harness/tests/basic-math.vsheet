@@ -1,0 +1,26 @@
+# Basic Math Operations Test
+# Tests simple cell operations and formulas
+
+# Set up some values
+SET A1 100
+SET A2 200
+SET A3 =A1+A2
+
+# Verify the results
+ASSERT A1 == 100
+ASSERT A2 == 200
+ASSERT A3 == 300
+
+# Test multiplication
+SET B1 5
+SET B2 10
+SET B3 =B1*B2
+ASSERT B3 == 50
+
+# Test division
+SET C1 100
+SET C2 4
+SET C3 =C1/C2
+ASSERT C3 == 25
+
+ECHO "Basic math tests passed!"
