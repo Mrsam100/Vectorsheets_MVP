@@ -243,6 +243,8 @@ interface PointerState {
   isDragging: boolean;
   /** Starting cell of drag */
   dragStartCell: { row: number; col: number } | null;
+  /** Last cell emitted during drag (for same-cell dedup) */
+  lastDragCell: { row: number; col: number } | null;
   /** Is this a fill handle drag? */
   isFillDrag: boolean;
   /** Is Ctrl/Cmd held? */
@@ -307,6 +309,7 @@ export class PointerAdapter {
     this.state = {
       isDragging: false,
       dragStartCell: null,
+      lastDragCell: null,
       isFillDrag: false,
       isAdditive: false,
       isExtending: false,
@@ -368,6 +371,7 @@ export class PointerAdapter {
     // Start drag tracking
     this.state.isDragging = true;
     this.state.dragStartCell = cell;
+    this.state.lastDragCell = cell;
     this.state.isFillDrag = false;
 
     this.emit(createIntent<BeginDragSelectionIntent>({
@@ -396,6 +400,11 @@ export class PointerAdapter {
     this.checkAutoScroll(e.clientX, e.clientY);
 
     if (cell) {
+      // Skip if cursor is still over the same cell as last emit (avoids redundant intents)
+      const last = this.state.lastDragCell;
+      if (last && last.row === cell.row && last.col === cell.col) return;
+      this.state.lastDragCell = cell;
+
       if (this.state.isFillDrag) {
         this.emit(createIntent<UpdateFillDragIntent>({
           type: 'UpdateFillDrag',
@@ -443,6 +452,7 @@ export class PointerAdapter {
     // Reset state
     this.state.isDragging = false;
     this.state.dragStartCell = null;
+    this.state.lastDragCell = null;
     this.state.isFillDrag = false;
 
     // Remove global listeners
@@ -507,6 +517,7 @@ export class PointerAdapter {
 
     this.state.isDragging = true;
     this.state.dragStartCell = anchorCell;
+    this.state.lastDragCell = anchorCell;
     this.state.isFillDrag = true;
 
     this.emit(createIntent<BeginFillDragIntent>({
@@ -608,6 +619,15 @@ export interface UsePointerAdapterOptions {
 export function usePointerAdapter(options: UsePointerAdapterOptions) {
   const adapterRef = useRef<PointerAdapter | null>(null);
 
+  // Use refs for frequently-changing callbacks to prevent adapter re-creation.
+  // Without this, every editState change recreates the adapter, which:
+  // 1. Disposes the old adapter (losing drag state mid-operation)
+  // 2. Creates a new adapter (losing global mousemove/mouseup listeners)
+  const onIntentRef = useRef(options.onIntent);
+  const getCellAtPointRef = useRef(options.getCellAtPoint);
+  onIntentRef.current = options.onIntent;
+  getCellAtPointRef.current = options.getCellAtPoint;
+
   // Get viewport bounds from container
   const getViewportBounds = useCallback(() => {
     const container = options.containerRef.current;
@@ -623,11 +643,12 @@ export function usePointerAdapter(options: UsePointerAdapterOptions) {
     };
   }, [options.containerRef]);
 
-  // Initialize adapter
+  // Initialize adapter once — callbacks forwarded via refs so adapter
+  // survives editState changes without losing drag state or listeners
   useEffect(() => {
     adapterRef.current = new PointerAdapter({
-      onIntent: options.onIntent,
-      getCellAtPoint: options.getCellAtPoint,
+      onIntent: (intent) => onIntentRef.current(intent),
+      getCellAtPoint: (x, y) => getCellAtPointRef.current(x, y),
       getViewportBounds,
       autoScrollThreshold: options.autoScrollThreshold,
       autoScrollSpeed: options.autoScrollSpeed,
@@ -637,7 +658,7 @@ export function usePointerAdapter(options: UsePointerAdapterOptions) {
       adapterRef.current?.dispose();
       adapterRef.current = null;
     };
-  }, [options.onIntent, options.getCellAtPoint, getViewportBounds, options.autoScrollThreshold, options.autoScrollSpeed]);
+  }, [getViewportBounds, options.autoScrollThreshold, options.autoScrollSpeed]);
 
   // Expose handler functions
   const handleCellMouseDown = useCallback((e: React.MouseEvent) => {

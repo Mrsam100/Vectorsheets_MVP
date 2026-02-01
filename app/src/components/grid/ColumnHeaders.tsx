@@ -11,7 +11,7 @@
  * Uses same column metrics as CellLayer (from RenderFrame)
  */
 
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { useGridContext } from './GridContext';
 import { getColumnLabel } from './types';
 import type { ColPosition } from './types';
@@ -93,14 +93,18 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
   ({ className = '' }) => {
     const { config, frame, isColSelected, onColHeaderClick } = useGridContext();
 
+    // Memoize frozen/scrollable column arrays to avoid O(n) filter + allocation per render.
+    // ColumnHeaders re-renders on every selection change via context, but columns
+    // only change when frame changes (scroll, zoom, resize).
+    const { frozenCols, scrollableCols } = useMemo(() => ({
+      frozenCols: frame?.columns.filter((col) => col.frozen) ?? [],
+      scrollableCols: frame?.columns.filter((col) => !col.frozen) ?? [],
+    }), [frame?.columns]);
+
     if (!frame) return null;
 
     // Header offset for adjusting column positions
     const headerOffset = config.rowHeaderWidth;
-
-    // Separate frozen and scrollable columns
-    const frozenCols = frame.columns.filter((col) => col.frozen);
-    const scrollableCols = frame.columns.filter((col) => !col.frozen);
 
     return (
       <div

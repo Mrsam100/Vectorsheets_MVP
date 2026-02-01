@@ -370,6 +370,17 @@ export interface SelectionState {
   ranges: SelectionRange[];
 }
 
+/**
+ * Format painter UI state — passed from parent, reflects engine state.
+ * The UI never evaluates or applies formats; it only renders visual affordances.
+ */
+export interface FormatPainterUIState {
+  /** Current mode: inactive (off), single (one-shot), persistent (locked on) */
+  mode: 'inactive' | 'single' | 'persistent';
+  /** Source range whose format was picked (null when inactive) */
+  sourceRange: SelectionRange | null;
+}
+
 // =============================================================================
 // Viewport/Scroll State
 // =============================================================================

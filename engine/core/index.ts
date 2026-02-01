@@ -38,7 +38,7 @@ export type {
 
 // Virtual Rendering
 export { VirtualRenderer } from './rendering/VirtualRenderer.js';
-export type { ViewportConfig, RowPosition, ColPosition } from './rendering/VirtualRenderer.js';
+export type { ViewportConfig, RowPosition, ColPosition, MergeProvider } from './rendering/VirtualRenderer.js';
 
 // Selection Management
 export { SelectionManager } from './selection/SelectionManager.js';

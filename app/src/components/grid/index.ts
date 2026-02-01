@@ -24,6 +24,10 @@ export { RowHeaders } from './RowHeaders';
 export { CellLayer } from './CellLayer';
 export { SelectionOverlay } from './SelectionOverlay';
 export type { SelectionOverlayProps } from './SelectionOverlay';
+export { FillHandleOverlay } from './FillHandleOverlay';
+export type { FillHandleOverlayProps } from './FillHandleOverlay';
+export { FormatPainterOverlay } from './FormatPainterOverlay';
+export type { FormatPainterOverlayProps } from './FormatPainterOverlay';
 
 // Interaction handling
 export { PointerAdapter, usePointerAdapter } from './PointerAdapter';

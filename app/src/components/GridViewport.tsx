@@ -49,6 +49,7 @@ import React, {
 import {
   VirtualRenderer,
   type DimensionProvider,
+  type MergeProvider,
   type RenderFrame as EngineRenderFrame,
 } from '../../../engine/core/rendering/VirtualRenderer';
 import type {
@@ -62,12 +63,17 @@ import {
   RowHeaders,
   CellLayer,
   SelectionOverlay,
+  FillHandleOverlay,
+  FormatPainterOverlay,
   type GridConfig,
   type ViewportDimensions,
   type ScrollState,
   type SelectionState,
+  type SelectionRange,
   type RenderFrame,
   type RenderCell,
+  type ConditionalFormatResult,
+  type FormatPainterUIState,
   DEFAULT_GRID_CONFIG,
 } from './grid';
 import { usePointerAdapter } from './grid/PointerAdapter';
@@ -123,6 +129,14 @@ export interface GridViewportProps {
   getCellValue?: (row: number, col: number) => string;
   /** Whether to show formula bar */
   showFormulaBar?: boolean;
+  /** Optional merge provider for merge-aware rendering */
+  mergeProvider?: MergeProvider;
+  /** Provider for pre-computed conditional format results (evaluated by caller) */
+  conditionalFormatProvider?: (row: number, col: number) => ConditionalFormatResult | null;
+  /** Format painter state (from engine, driven by parent) */
+  formatPainterState?: FormatPainterUIState;
+  /** Callback when format painter should apply at target cell */
+  onFormatPainterApply?: (row: number, col: number) => void;
 }
 
 export interface GridViewportHandle {
@@ -158,8 +172,60 @@ function roundZoom(zoom: number): number {
   return Math.round(zoom * 100) / 100;
 }
 
-function adaptRenderCell(engineCell: EngineRenderCell): RenderCell {
+type CFProvider = (row: number, col: number) => ConditionalFormatResult | null;
+
+function adaptRenderCell(
+  engineCell: EngineRenderCell,
+  cfProvider?: CFProvider,
+): RenderCell {
   const cell = engineCell.cell as EngineCell | null;
+
+  // Compute valueType early — needed for auto-alignment below
+  const valueType: RenderCell['valueType'] =
+    !cell || cell.value == null ? 'empty'
+    : cell.type === 'error' ? 'error'
+    : typeof cell.value === 'number' ? 'number'
+    : typeof cell.value === 'boolean' ? 'boolean'
+    : 'string';
+
+  // Excel-style auto-alignment: when engine hasn't set explicit alignment,
+  // numbers right-align, booleans center, text/empty left-align.
+  const explicitAlign = cell?.format?.horizontalAlign;
+  const horizontalAlign = explicitAlign ?? (
+    valueType === 'number' ? 'right' as const
+    : valueType === 'boolean' ? 'center' as const
+    : undefined
+  );
+
+  // Base format from engine Cell
+  const baseFormat = {
+    fontFamily: cell?.format?.fontFamily,
+    fontSize: cell?.format?.fontSize,
+    fontColor: cell?.format?.fontColor,
+    bold: cell?.format?.bold,
+    italic: cell?.format?.italic,
+    underline: cell?.format?.underline ? true : undefined,
+    strikethrough: cell?.format?.strikethrough,
+    horizontalAlign,
+    verticalAlign: cell?.format?.verticalAlign,
+    backgroundColor: cell?.format?.backgroundColor,
+    numberFormat: cell?.format?.numberFormat,
+  };
+
+  // Query conditional format provider
+  const cf = cfProvider?.(engineCell.row, engineCell.col) ?? undefined;
+
+  // Pre-merge conditional format overrides + colorScale into format so
+  // CellLayer renders formatToStyles(cell.format) once — no override logic.
+  let format = baseFormat;
+  if (cf && (cf.formatOverrides || cf.colorScale)) {
+    format = {
+      ...baseFormat,
+      ...cf.formatOverrides,
+      ...(cf.colorScale ? { backgroundColor: cf.colorScale } : {}),
+    };
+  }
+
   return {
     row: engineCell.row,
     col: engineCell.col,
@@ -168,22 +234,15 @@ function adaptRenderCell(engineCell: EngineRenderCell): RenderCell {
     width: engineCell.width,
     height: engineCell.height,
     displayValue: cell?.displayValue ?? (cell?.value != null ? String(cell.value) : ''),
-    valueType: !cell || cell.value == null ? 'empty' : cell.type === 'error' ? 'error' : typeof cell.value === 'number' ? 'number' : typeof cell.value === 'boolean' ? 'boolean' : 'string',
+    valueType,
     isFormula: cell?.formula !== undefined,
     errorCode: cell?.type === 'error' ? String(cell.value) : undefined,
-    format: {
-      fontFamily: cell?.format?.fontFamily,
-      fontSize: cell?.format?.fontSize,
-      fontColor: cell?.format?.fontColor,
-      bold: cell?.format?.bold,
-      italic: cell?.format?.italic,
-      underline: cell?.format?.underline ? true : undefined,
-      strikethrough: cell?.format?.strikethrough,
-      horizontalAlign: cell?.format?.horizontalAlign,
-      verticalAlign: cell?.format?.verticalAlign,
-      backgroundColor: cell?.format?.backgroundColor,
-      numberFormat: cell?.format?.numberFormat,
-    },
+    format,
+    // Only carry dataBar/icon on conditionalFormat (visual child elements).
+    // Format overrides and colorScale are already absorbed into format above.
+    conditionalFormat: cf && (cf.dataBar || cf.icon)
+      ? { dataBar: cf.dataBar, icon: cf.icon }
+      : undefined,
     merge: cell?.merge
       ? { isAnchor: true, isHidden: false, rowSpan: cell.merge.rowSpan, colSpan: cell.merge.colSpan }
       : cell?.mergeParent
@@ -194,9 +253,13 @@ function adaptRenderCell(engineCell: EngineRenderCell): RenderCell {
   };
 }
 
-function adaptRenderFrame(engineFrame: EngineRenderFrame, zoom: number): RenderFrame {
+function adaptRenderFrame(
+  engineFrame: EngineRenderFrame,
+  zoom: number,
+  cfProvider?: CFProvider,
+): RenderFrame {
   return {
-    cells: engineFrame.cells.map(adaptRenderCell),
+    cells: engineFrame.cells.map(c => adaptRenderCell(c, cfProvider)),
     rows: engineFrame.rows,
     columns: engineFrame.columns,
     scroll: engineFrame.scroll,
@@ -245,6 +308,10 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       onFill,
       getCellValue: getCellValueProp,
       showFormulaBar = true,
+      mergeProvider,
+      conditionalFormatProvider,
+      formatPainterState,
+      onFormatPainterApply,
     },
     ref
   ) => {
@@ -253,6 +320,16 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<VirtualRenderer | null>(null);
     const selectionRef = useRef<SelectionState>(null!); // Ref for avoiding stale closures
+    const zoomRef = useRef(initialZoom);
+    const scrollRef = useRef<ScrollState>({ scrollLeft: 0, scrollTop: 0 });
+    // Ref for conditional format provider — avoids effect dep on potentially unstable callback
+    const cfProviderRef = useRef(conditionalFormatProvider);
+    cfProviderRef.current = conditionalFormatProvider;
+    // Refs for format painter — avoids onIntent dep on potentially unstable callback/state
+    const formatPainterStateRef = useRef(formatPainterState);
+    formatPainterStateRef.current = formatPainterState;
+    const onFormatPainterApplyRef = useRef(onFormatPainterApply);
+    onFormatPainterApplyRef.current = onFormatPainterApply;
 
     // State
     const [zoom, setZoomState] = useState(() => clampZoom(initialZoom));
@@ -265,9 +342,16 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     const [frame, setFrame] = useState<RenderFrame | null>(null);
     const [renderKey, setRenderKey] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
+    // Fill source range: captured at BeginFillDrag for dashed target preview
+    const [fillSourceRange, setFillSourceRange] = useState<SelectionRange | null>(null);
+    // Hover cell: tracked only when format painter is active
+    const [hoverCell, setHoverCell] = useState<{ row: number; col: number } | null>(null);
+    const hoverRafRef = useRef<number | null>(null);
 
-    // Keep selectionRef in sync to avoid stale closures in callbacks
+    // Keep refs in sync to avoid stale closures in callbacks
     selectionRef.current = selection;
+    zoomRef.current = zoom;
+    scrollRef.current = scroll;
 
     // Track previous active cell for scroll-to-cell on change
     const prevActiveCellRef = useRef<{ row: number; col: number } | null>(null);
@@ -329,7 +413,9 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         formatCellReference: formatCellAddress,
       });
 
-    // VirtualRenderer - create/update renderer when config changes
+    // VirtualRenderer - create/update renderer when config changes.
+    // mergeProvider is NOT in this dep array — it uses setMergeProvider below
+    // so changing merge state doesn't destroy the renderer and its cached viewport.
     useEffect(() => {
       const renderer = new VirtualRenderer(dimensions, {
         width: viewport.width || 1200,
@@ -342,32 +428,48 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         headerHeight: config.colHeaderHeight,
         zoom,
       });
+      renderer.setMergeProvider(mergeProvider ?? null);
       rendererRef.current = renderer;
 
       return () => {
         rendererRef.current = null;
       };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dimensions, config, viewport, zoom, renderKey]);
 
-    // Update frame when renderer, scroll, or zoom changes
-    // Using a separate effect ensures frame is updated after renderer is ready
+    // Update merge provider without recreating the renderer (preserves caches)
+    useEffect(() => {
+      rendererRef.current?.setMergeProvider(mergeProvider ?? null);
+    }, [mergeProvider]);
+
+    // Update frame when renderer config changes (zoom, viewport, renderKey)
+    // Scroll-triggered frame updates are batched inside handleScroll and autoScroll callback
+    // to avoid the double-render: setScroll→render→effect→setFrame→render
     useEffect(() => {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
-      renderer.setScroll(scroll.scrollLeft, scroll.scrollTop);
+      const currentScroll = scrollRef.current;
+      renderer.setScroll(currentScroll.scrollLeft, currentScroll.scrollTop);
       const engineFrame = renderer.getRenderFrame();
-      setFrame(adaptRenderFrame(engineFrame, zoom));
-    }, [scroll, zoom, viewport, renderKey]); // viewport and renderKey trigger re-render after new renderer
+      setFrame(adaptRenderFrame(engineFrame, zoom, cfProviderRef.current));
+    }, [zoom, viewport, renderKey, mergeProvider, conditionalFormatProvider]); // scroll removed — handled synchronously in handleScroll
 
     // Auto-scroll controller (replaces interval-based auto-scroll)
     const autoScroll = useAutoScroll({
       containerRef: containerRef as React.RefObject<HTMLElement>,
       scrollContainerRef: scrollContainerRef as React.RefObject<HTMLElement>,
       onScroll: (newScroll) => {
-        setScroll(newScroll);
-        // During auto-scroll, continue drag selection with the cell under cursor
-        // This is handled by PointerAdapter's mousemove event
+        // Batch scroll + frame into one render (same pattern as handleScroll)
+        const renderer = rendererRef.current;
+        if (renderer) {
+          renderer.setScroll(newScroll.scrollLeft, newScroll.scrollTop);
+          const engineFrame = renderer.getRenderFrame();
+          setScroll(newScroll);
+          setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current));
+        } else {
+          setScroll(newScroll);
+        }
       },
       getMaxScroll: () => {
         const renderer = rendererRef.current;
@@ -505,6 +607,21 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         autoScroll.stop();
       }
 
+      // Track fill source range for dashed preview during fill drag.
+      // Read from selectionRef (always current) to avoid selection.ranges as a dep.
+      if (intent.type === 'BeginFillDrag') {
+        setFillSourceRange(selectionRef.current.ranges[0] ?? null);
+      } else if (intent.type === 'EndFillDrag' || intent.type === 'EndDragSelection') {
+        setFillSourceRange(null);
+      }
+
+      // Format painter: intercept click to apply format, then continue normal selection.
+      // Read from refs to keep onIntent stable (avoid recreation on painter state changes).
+      const fpState = formatPainterStateRef.current;
+      if (intent.type === 'SetActiveCell' && fpState && fpState.mode !== 'inactive') {
+        onFormatPainterApplyRef.current?.(intent.row, intent.col);
+      }
+
       // Check if edit mode wants to handle this intent (e.g., Point mode cell click)
       if (intent.type === 'SetActiveCell' && editState.isEditing && editState.mode === 'point') {
         const editResult = handleEditCellClick(intent.row, intent.col, false);
@@ -558,6 +675,37 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
       return renderer.getCellAtPoint(localX, localY);
     }, []);
+
+    // =========================================================================
+    // Hover tracking (format painter only — zero overhead when inactive)
+    // =========================================================================
+
+    const handleHoverMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+      if (hoverRafRef.current !== null) return;
+      hoverRafRef.current = requestAnimationFrame(() => {
+        hoverRafRef.current = null;
+        const cell = getCellAtPoint(e.clientX, e.clientY);
+        setHoverCell(prev => {
+          if (prev?.row === cell?.row && prev?.col === cell?.col) return prev;
+          return cell;
+        });
+      });
+    }, [getCellAtPoint]);
+
+    const handleHoverLeave = useCallback(() => {
+      setHoverCell(null);
+    }, []);
+
+    // Cancel pending rAF on unmount to avoid setState on unmounted component
+    useEffect(() => {
+      return () => {
+        if (hoverRafRef.current !== null) {
+          cancelAnimationFrame(hoverRafRef.current);
+        }
+      };
+    }, []);
+
+    const isFormatPainterActive = formatPainterState != null && formatPainterState.mode !== 'inactive';
 
     // =========================================================================
     // Pointer Adapter
@@ -669,7 +817,24 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
     const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
       const target = e.target as HTMLDivElement;
-      setScroll({ scrollLeft: target.scrollLeft, scrollTop: target.scrollTop });
+      const newScrollLeft = target.scrollLeft;
+      const newScrollTop = target.scrollTop;
+
+      // Early exit if scroll unchanged (prevents redundant renders from programmatic scroll)
+      const current = scrollRef.current;
+      if (current.scrollLeft === newScrollLeft && current.scrollTop === newScrollTop) return;
+
+      // Batch scroll + frame computation into a single render
+      // (eliminates the old pattern: setScroll → render → effect → setFrame → render)
+      const renderer = rendererRef.current;
+      if (renderer) {
+        renderer.setScroll(newScrollLeft, newScrollTop);
+        const engineFrame = renderer.getRenderFrame();
+        setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
+        setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current));
+      } else {
+        setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
+      }
     }, []);
 
     // Selection helpers for context
@@ -747,14 +912,9 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         };
       }
 
-      // Get cell position using renderer's methods
-      const x = renderer.getColLeft(col);
-      const y = renderer.getRowTop(row);
-      const width = dimensions.getColumnWidth(col);
-      const height = dimensions.getRowHeight(row);
-
-      return { x, y, width, height };
-    }, [dimensions]);
+      // getCellRect is merge-aware: returns anchor position + span dimensions
+      return renderer.getCellRect(row, col);
+    }, []);
 
     // Get active cell info for formula bar
     const activeCell = selection.activeCell;
@@ -766,6 +926,12 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       if (!editState.isEditing || !editState.editingCell) return null;
       return getCellPosition(editState.editingCell.row, editState.editingCell.col);
     }, [editState.isEditing, editState.editingCell, getCellPosition]);
+
+    // Check if the cell being edited is a merged cell
+    const isEditingMergedCell = useMemo(() => {
+      if (!editState.isEditing || !editState.editingCell || !mergeProvider) return false;
+      return mergeProvider.getMergeInfo(editState.editingCell.row, editState.editingCell.col) !== null;
+    }, [editState.isEditing, editState.editingCell, mergeProvider]);
 
     // Navigation handlers for editor components
     const handleEditorNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
@@ -886,8 +1052,11 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
                 left: config.rowHeaderWidth,
                 right: 0,
                 bottom: 0,
+                cursor: isFormatPainterActive ? 'copy' : undefined,
               }}
               onScroll={handleScroll}
+              onMouseMove={isFormatPainterActive ? handleHoverMove : undefined}
+              onMouseLeave={isFormatPainterActive ? handleHoverLeave : undefined}
             >
               <div
                 className="relative"
@@ -915,9 +1084,24 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
                   />
                 )}
 
-                <SelectionOverlay
+                {/* Format Painter Overlay (source highlight + hover preview) */}
+                {isFormatPainterActive && formatPainterState && (
+                  <FormatPainterOverlay
+                    state={formatPainterState}
+                    hoverCell={hoverCell}
+                    getCellPosition={getCellPosition}
+                    scroll={scroll}
+                  />
+                )}
+
+                <SelectionOverlay />
+
+                <FillHandleOverlay
                   onFillHandleMouseDown={pointerAdapter.handleFillHandleMouseDown}
                   isDragging={isDragging}
+                  isEditing={isEditing}
+                  isFormatPainterActive={isFormatPainterActive}
+                  fillSourceRange={fillSourceRange}
                 />
 
                 {/* Cell Editor Overlay */}
@@ -926,6 +1110,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
                     state={editState}
                     actions={editActions}
                     cellPosition={editorPosition}
+                    isMergedCell={isEditingMergedCell}
                     onEnter={handleEnterNavigation}
                     onTab={handleTabNavigation}
                     onArrowNav={handleEditorNavigation}

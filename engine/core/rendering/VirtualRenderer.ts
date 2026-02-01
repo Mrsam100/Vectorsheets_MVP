@@ -56,6 +56,24 @@ export interface DimensionProvider {
 }
 
 // =============================================================================
+// Merge Provider Interface (Optional - for merge-aware rendering)
+// =============================================================================
+
+/**
+ * Interface for providing merge cell information to VirtualRenderer.
+ * Optional — if not provided, no merge logic is applied (backward compatible).
+ */
+export interface MergeProvider {
+  /** Get merge info for any cell (anchor or covered). Returns null if not merged. */
+  getMergeInfo(row: number, col: number):
+    | { anchor: { row: number; col: number }; rowSpan: number; colSpan: number }
+    | null;
+  /** Get all merges whose display area intersects a given range. */
+  getMergesInRange(range: CellRange):
+    Array<{ anchor: { row: number; col: number }; rowSpan: number; colSpan: number }>;
+}
+
+// =============================================================================
 // Configuration Types
 // =============================================================================
 
@@ -352,6 +370,9 @@ export class VirtualRenderer {
   // Cached viewport (invalidated on scroll/config change)
   private cachedViewport: Viewport | null = null;
 
+  // Optional merge provider for merge-aware rendering
+  private mergeProvider: MergeProvider | null = null;
+
   // Compatibility: maintain dataStore reference for existing code
   // TODO: Remove after migrating all consumers to DimensionProvider
   private _dataStore: DimensionProvider;
@@ -361,13 +382,16 @@ export class VirtualRenderer {
    *
    * @param dimensions - Provider for row heights, column widths, and cell data
    * @param config - Viewport and rendering configuration
+   * @param mergeProvider - Optional merge info provider for merge-aware rendering
    */
   constructor(
     dimensions: DimensionProvider,
-    config: Partial<ViewportConfig> = {}
+    config: Partial<ViewportConfig> = {},
+    mergeProvider?: MergeProvider
   ) {
     this.dimensions = dimensions;
     this._dataStore = dimensions; // Compatibility alias
+    this.mergeProvider = mergeProvider ?? null;
 
     // Merge with sensible defaults (support deprecated rowBuffer/colBuffer)
     this.config = {
@@ -441,6 +465,13 @@ export class VirtualRenderer {
   }
 
   /**
+   * Set or clear merge provider for merge-aware rendering.
+   */
+  setMergeProvider(provider: MergeProvider | null): void {
+    this.mergeProvider = provider;
+  }
+
+  /**
    * Get current configuration (readonly copy).
    */
   getConfig(): Readonly<ViewportConfig> {
@@ -474,10 +505,25 @@ export class VirtualRenderer {
    * Returns the new scroll position.
    */
   scrollToCell(row: number, col: number): ScrollPosition {
-    const cellTop = this.getRowTop(row);
-    const cellLeft = this.getColLeft(col);
-    const cellHeight = this.dimensions.getRowHeight(row);
-    const cellWidth = this.dimensions.getColumnWidth(col);
+    // Redirect to merge anchor so the full merge is scrolled into view
+    let targetRow = row;
+    let targetCol = col;
+    let cellWidth = this.dimensions.getColumnWidth(col);
+    let cellHeight = this.dimensions.getRowHeight(row);
+
+    if (this.mergeProvider) {
+      const mi = this.mergeProvider.getMergeInfo(row, col);
+      if (mi) {
+        targetRow = mi.anchor.row;
+        targetCol = mi.anchor.col;
+        ({ width: cellWidth, height: cellHeight } = this.computeSpanDimensions(
+          targetRow, targetCol, mi.rowSpan, mi.colSpan,
+        ));
+      }
+    }
+
+    const cellTop = this.getRowTop(targetRow);
+    const cellLeft = this.getColLeft(targetCol);
 
     const viewableWidth = this.getViewableWidth();
     const viewableHeight = this.getViewableHeight();
@@ -488,7 +534,7 @@ export class VirtualRenderer {
     let newScrollY = this.scrollY;
 
     // Only scroll for non-frozen cells
-    if (col >= this.config.frozenCols) {
+    if (targetCol >= this.config.frozenCols) {
       const effectiveLeft = cellLeft - frozenWidth;
       if (effectiveLeft < this.scrollX) {
         newScrollX = effectiveLeft;
@@ -497,7 +543,7 @@ export class VirtualRenderer {
       }
     }
 
-    if (row >= this.config.frozenRows) {
+    if (targetRow >= this.config.frozenRows) {
       const effectiveTop = cellTop - frozenHeight;
       if (effectiveTop < this.scrollY) {
         newScrollY = effectiveTop;
@@ -585,6 +631,49 @@ export class VirtualRenderer {
   }
 
   /**
+   * Compute the total width and height of a merge span, skipping hidden rows/cols.
+   * Shared by createRenderCell, getCellRect, and scrollToCell to avoid duplication.
+   */
+  private computeSpanDimensions(
+    anchorRow: number,
+    anchorCol: number,
+    rowSpan: number,
+    colSpan: number,
+  ): { width: number; height: number } {
+    let width = 0;
+    for (let c = anchorCol; c < anchorCol + colSpan; c++) {
+      if (!this.dimensions.isColumnHidden(c)) width += this.dimensions.getColumnWidth(c);
+    }
+    let height = 0;
+    for (let r = anchorRow; r < anchorRow + rowSpan; r++) {
+      if (!this.dimensions.isRowHidden(r)) height += this.dimensions.getRowHeight(r);
+    }
+    return { width, height };
+  }
+
+  /**
+   * Get the content-coordinate rectangle for a cell, accounting for merges.
+   * If the cell is part of a merge, returns the anchor's position with full
+   * span dimensions. Otherwise returns the single cell's position and size.
+   */
+  getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } {
+    if (this.mergeProvider) {
+      const mi = this.mergeProvider.getMergeInfo(row, col);
+      if (mi) {
+        const { anchor, rowSpan, colSpan } = mi;
+        const { width, height } = this.computeSpanDimensions(anchor.row, anchor.col, rowSpan, colSpan);
+        return { x: this.getColLeft(anchor.col), y: this.getRowTop(anchor.row), width, height };
+      }
+    }
+    return {
+      x: this.getColLeft(col),
+      y: this.getRowTop(row),
+      width: this.dimensions.getColumnWidth(col),
+      height: this.dimensions.getRowHeight(row),
+    };
+  }
+
+  /**
    * Get cell at screen coordinates (accounting for headers, scroll, zoom).
    * Returns null if coordinates are in header area or out of bounds.
    */
@@ -618,6 +707,12 @@ export class VirtualRenderer {
 
     // Bounds check
     if (row >= MAX_ROWS || col >= MAX_COLS) return null;
+
+    // Redirect covered merge cells to their anchor
+    if (this.mergeProvider) {
+      const mi = this.mergeProvider.getMergeInfo(row, col);
+      if (mi) return { row: mi.anchor.row, col: mi.anchor.col };
+    }
 
     return { row, col };
   }
@@ -724,13 +819,30 @@ export class VirtualRenderer {
     const viewport = this.getViewport();
     const cells: RenderCell[] = [];
     const zoom = this.config.zoom;
+    const mp = this.mergeProvider;
+
+    // Track emitted anchor cells to avoid duplicates from off-screen anchor pass.
+    // Uses numeric keys (row * MAX_COLS + col) to avoid string allocation per cell.
+    const emittedAnchors: Set<number> | null = mp ? new Set<number>() : null;
+
+    // Helper: check if a cell is a covered (non-anchor) merge cell.
+    // Uses MergeProvider directly (not Cell.mergeParent) so skip logic works
+    // even when DimensionProvider.getCell is not implemented.
+    const isCoveredCell = mp
+      ? (row: number, col: number): boolean => {
+          const mi = mp.getMergeInfo(row, col);
+          return mi !== null && (mi.anchor.row !== row || mi.anchor.col !== col);
+        }
+      : null;
 
     // 1. Frozen corner (frozen rows AND frozen columns)
     for (let row = 0; row < this.config.frozenRows; row++) {
       if (this.dimensions.isRowHidden(row)) continue;
       for (let col = 0; col < this.config.frozenCols; col++) {
         if (this.dimensions.isColumnHidden(col)) continue;
+        if (isCoveredCell?.(row, col)) continue;
         cells.push(this.createRenderCell(row, col, true, true, zoom));
+        emittedAnchors?.add(row * MAX_COLS + col);
       }
     }
 
@@ -740,7 +852,9 @@ export class VirtualRenderer {
       for (let col = viewport.startCol; col <= viewport.endCol; col++) {
         if (col < this.config.frozenCols) continue; // Skip frozen corner
         if (this.dimensions.isColumnHidden(col)) continue;
+        if (isCoveredCell?.(row, col)) continue;
         cells.push(this.createRenderCell(row, col, true, false, zoom));
+        emittedAnchors?.add(row * MAX_COLS + col);
       }
     }
 
@@ -750,7 +864,9 @@ export class VirtualRenderer {
       for (let row = viewport.startRow; row <= viewport.endRow; row++) {
         if (row < this.config.frozenRows) continue; // Skip frozen corner
         if (this.dimensions.isRowHidden(row)) continue;
+        if (isCoveredCell?.(row, col)) continue;
         cells.push(this.createRenderCell(row, col, false, true, zoom));
+        emittedAnchors?.add(row * MAX_COLS + col);
       }
     }
 
@@ -762,8 +878,44 @@ export class VirtualRenderer {
       for (let col = viewport.startCol; col <= viewport.endCol; col++) {
         if (col < this.config.frozenCols) continue;
         if (this.dimensions.isColumnHidden(col)) continue;
+        if (isCoveredCell?.(row, col)) continue;
 
         cells.push(this.createRenderCell(row, col, false, false, zoom));
+        emittedAnchors?.add(row * MAX_COLS + col);
+      }
+    }
+
+    // 5. Off-screen anchors: merges whose anchor is outside the viewport but
+    //    whose span extends into the visible area (partially-scrolled merges)
+    if (mp && emittedAnchors) {
+      const visibleMerges = mp.getMergesInRange({
+        startRow: 0,
+        startCol: 0,
+        endRow: viewport.endRow,
+        endCol: viewport.endCol,
+      });
+
+      for (const merge of visibleMerges) {
+        const { anchor } = merge;
+        const key = anchor.row * MAX_COLS + anchor.col;
+        if (emittedAnchors.has(key)) continue;
+
+        // Only emit if the merge's display area actually reaches the visible area.
+        // Frozen-area anchors are already emitted by quadrants 1-3 and present in
+        // emittedAnchors, so this pass only handles anchors outside the iteration
+        // bounds whose span extends into the scrollable viewport.
+        const mergeEndRow = anchor.row + merge.rowSpan - 1;
+        const mergeEndCol = anchor.col + merge.colSpan - 1;
+        const overlapsViewport =
+          mergeEndRow >= viewport.startRow &&
+          mergeEndCol >= viewport.startCol;
+
+        if (overlapsViewport) {
+          const frozenR = anchor.row < this.config.frozenRows;
+          const frozenC = anchor.col < this.config.frozenCols;
+          cells.push(this.createRenderCell(anchor.row, anchor.col, frozenR, frozenC, zoom));
+          emittedAnchors.add(key);
+        }
       }
     }
 
@@ -783,8 +935,18 @@ export class VirtualRenderer {
     // Content coordinates
     let x = this.getColLeft(col);
     let y = this.getRowTop(row);
-    const width = this.dimensions.getColumnWidth(col);
-    const height = this.dimensions.getRowHeight(row);
+    let width = this.dimensions.getColumnWidth(col);
+    let height = this.dimensions.getRowHeight(row);
+
+    // Compute span dimensions for merge anchor cells.
+    // Uses MergeProvider (not Cell.merge) so span logic works even when
+    // DimensionProvider.getCell is not implemented.
+    if (this.mergeProvider) {
+      const mi = this.mergeProvider.getMergeInfo(row, col);
+      if (mi && mi.anchor.row === row && mi.anchor.col === col) {
+        ({ width, height } = this.computeSpanDimensions(row, col, mi.rowSpan, mi.colSpan));
+      }
+    }
 
     // Apply scroll offset for non-frozen cells
     if (!frozenCol) {

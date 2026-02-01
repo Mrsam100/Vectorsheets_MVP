@@ -16,8 +16,7 @@
  * │   ┌─────────────────────────────────────────────────────────────┐       │
  * │   │ Active Cell Border (z-index: 50)                            │       │
  * │   │ - 2px solid blue border                                     │       │
- * │   │ - Fill handle in bottom-right corner                        │       │
- * │   │ - Hidden during drag operations                             │       │
+ * │   │ - Fill handle rendered by FillHandleOverlay (separate)      │       │
  * │   └─────────────────────────────────────────────────────────────┘       │
  * │                                                                         │
  * │   Performance Optimizations:                                            │
@@ -29,7 +28,7 @@
  * └─────────────────────────────────────────────────────────────────────────┘
  */
 
-import React, { memo, useMemo, useCallback } from 'react';
+import React, { memo, useMemo } from 'react';
 import { useGridContext } from './GridContext';
 import type { SelectionRange, RenderCell, RenderFrame, RowPosition, ColPosition } from './types';
 
@@ -42,10 +41,6 @@ export interface SelectionOverlayProps {
   className?: string;
   /** Optional inline styles */
   style?: React.CSSProperties;
-  /** Callback when fill handle is dragged */
-  onFillHandleMouseDown?: (e: React.MouseEvent, anchorCell: { row: number; col: number }) => void;
-  /** Is a drag operation in progress? (hides fill handle) */
-  isDragging?: boolean;
 }
 
 interface RangeRect {
@@ -66,16 +61,22 @@ interface NormalizedRange {
 // Optimized Lookup Structures
 // =============================================================================
 
+// Numeric key avoids per-cell string allocation during Map.set (hot path on scroll)
+const CELL_KEY_COLS = 16384;
+function cellKey(row: number, col: number): number {
+  return row * CELL_KEY_COLS + col;
+}
+
 /**
  * Create O(1) lookup maps for cells, rows, and columns
  */
 function createLookupMaps(frame: RenderFrame) {
-  const cellMap = new Map<string, RenderCell>();
+  const cellMap = new Map<number, RenderCell>();
   const rowMap = new Map<number, RowPosition>();
   const colMap = new Map<number, ColPosition>();
 
   for (const cell of frame.cells) {
-    cellMap.set(`${cell.row},${cell.col}`, cell);
+    cellMap.set(cellKey(cell.row, cell.col), cell);
   }
   for (const row of frame.rows) {
     rowMap.set(row.row, row);
@@ -144,30 +145,30 @@ function calculateRangeRect(
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  // Try to find corner cells for bounds (O(1) lookups)
-  const corners = [
-    cellMap.get(`${clampedMinRow},${clampedMinCol}`),
-    cellMap.get(`${clampedMinRow},${clampedMaxCol}`),
-    cellMap.get(`${clampedMaxRow},${clampedMinCol}`),
-    cellMap.get(`${clampedMaxRow},${clampedMaxCol}`),
-  ];
+  // Try to find corner cells for bounds (O(1) lookups, no array allocation)
+  const tl = cellMap.get(cellKey(clampedMinRow, clampedMinCol));
+  const tr = cellMap.get(cellKey(clampedMinRow, clampedMaxCol));
+  const bl = cellMap.get(cellKey(clampedMaxRow, clampedMinCol));
+  const br = cellMap.get(cellKey(clampedMaxRow, clampedMaxCol));
 
-  let foundCorners = 0;
-  for (const cell of corners) {
-    if (cell) {
-      foundCorners++;
-      const cellX = cell.x - headerOffset.x;
-      const cellY = cell.y - headerOffset.y;
-      minX = Math.min(minX, cellX);
-      minY = Math.min(minY, cellY);
-      maxX = Math.max(maxX, cellX + cell.width);
-      maxY = Math.max(maxY, cellY + cell.height);
-    }
+  if (tl && tr && bl && br) {
+    const tlX = tl.x - headerOffset.x;
+    const tlY = tl.y - headerOffset.y;
+    const brX = br.x - headerOffset.x + br.width;
+    const brY = br.y - headerOffset.y + br.height;
+    return { x: tlX, y: tlY, width: brX - tlX, height: brY - tlY };
   }
 
-  // If we found all corners, we're done
-  if (foundCorners === 4) {
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  // Partial corners found — accumulate bounds
+  for (const c of [tl, tr, bl, br]) {
+    if (c) {
+      const cx = c.x - headerOffset.x;
+      const cy = c.y - headerOffset.y;
+      if (cx < minX) minX = cx;
+      if (cy < minY) minY = cy;
+      if (cx + c.width > maxX) maxX = cx + c.width;
+      if (cy + c.height > maxY) maxY = cy + c.height;
+    }
   }
 
   // Fallback: use row/column positions for bounds we couldn't find
@@ -264,21 +265,10 @@ SelectionRect.displayName = 'SelectionRect';
 interface ActiveCellBorderProps {
   cell: RenderCell;
   headerOffset: { x: number; y: number };
-  showFillHandle: boolean;
-  onFillHandleMouseDown?: (e: React.MouseEvent, anchorCell: { row: number; col: number }) => void;
 }
 
 const ActiveCellBorder: React.FC<ActiveCellBorderProps> = memo(
-  ({ cell, headerOffset, showFillHandle, onFillHandleMouseDown }) => {
-    const handleFillMouseDown = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        e.preventDefault();
-        onFillHandleMouseDown?.(e, { row: cell.row, col: cell.col });
-      },
-      [cell.row, cell.col, onFillHandleMouseDown]
-    );
-
+  ({ cell, headerOffset }) => {
     const x = cell.x - headerOffset.x;
     const y = cell.y - headerOffset.y;
 
@@ -301,42 +291,22 @@ const ActiveCellBorder: React.FC<ActiveCellBorderProps> = memo(
         }}
         role="presentation"
         aria-label={`Active cell at row ${cell.row + 1}, column ${cell.col + 1}`}
-      >
-        {/* Fill handle (bottom-right corner) */}
-        {showFillHandle && (
-          <div
-            className="fill-handle absolute cursor-crosshair"
-            style={{
-              right: -5,
-              bottom: -5,
-              width: 10,
-              height: 10,
-              backgroundColor: '#2563eb',
-              border: '2px solid white',
-              borderRadius: 1,
-              zIndex: 51,
-              pointerEvents: 'auto',
-              // Smooth hover effect
-              transition: 'transform 100ms ease-out, background-color 100ms ease-out',
-            }}
-            onMouseDown={handleFillMouseDown}
-            onMouseEnter={(e) => {
-              (e.target as HTMLElement).style.transform = 'scale(1.2)';
-            }}
-            onMouseLeave={(e) => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-            role="button"
-            aria-label="Fill handle - drag to fill cells"
-            tabIndex={-1}
-          />
-        )}
-      </div>
+      />
     );
   }
 );
 
 ActiveCellBorder.displayName = 'ActiveCellBorder';
+
+// =============================================================================
+// Static Styles (hoisted to avoid per-render allocation)
+// =============================================================================
+
+const OVERLAY_STYLE: React.CSSProperties = {
+  zIndex: 40,
+  pointerEvents: 'none',
+  transform: 'translateZ(0)',
+};
 
 // =============================================================================
 // Main SelectionOverlay Component
@@ -346,7 +316,7 @@ ActiveCellBorder.displayName = 'ActiveCellBorder';
  * SelectionOverlay - Renders all selection visuals
  *
  * Responsibilities:
- * 1. Render active cell border with fill handle
+ * 1. Render active cell border
  * 2. Render primary selection rectangle
  * 3. Render secondary selection ranges (multi-select)
  *
@@ -357,7 +327,7 @@ ActiveCellBorder.displayName = 'ActiveCellBorder';
  * - GPU-accelerated for smooth performance
  */
 export const SelectionOverlay: React.FC<SelectionOverlayProps> = memo(
-  ({ className = '', style, onFillHandleMouseDown, isDragging = false }) => {
+  ({ className = '', style }) => {
     const { config, frame, selection } = useGridContext();
 
     // Header offset for position calculations
@@ -399,13 +369,8 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = memo(
     // Find active cell render data with O(1) lookup
     const activeCellRender = useMemo(() => {
       if (!frame || !lookups || !selection.activeCell) return null;
-      return lookups.cellMap.get(`${selection.activeCell.row},${selection.activeCell.col}`) ?? null;
+      return lookups.cellMap.get(cellKey(selection.activeCell.row, selection.activeCell.col)) ?? null;
     }, [frame, lookups, selection.activeCell]);
-
-    // Show fill handle only when:
-    // 1. There's a visible active cell
-    // 2. Not currently dragging (drag selection or fill drag)
-    const showFillHandle = activeCellRender !== null && !isDragging;
 
     // Don't render if no frame
     if (!frame) return null;
@@ -413,13 +378,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = memo(
     return (
       <div
         className={`selection-overlay absolute inset-0 overflow-hidden ${className}`}
-        style={{
-          zIndex: 40,
-          pointerEvents: 'none',
-          // Enable GPU compositing for the entire overlay
-          transform: 'translateZ(0)',
-          ...style,
-        }}
+        style={style ? { ...OVERLAY_STYLE, ...style } : OVERLAY_STYLE}
         role="presentation"
         aria-label="Selection indicators"
       >
@@ -439,8 +398,6 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = memo(
           <ActiveCellBorder
             cell={activeCellRender}
             headerOffset={headerOffset}
-            showFillHandle={showFillHandle}
-            onFillHandleMouseDown={onFillHandleMouseDown}
           />
         )}
       </div>

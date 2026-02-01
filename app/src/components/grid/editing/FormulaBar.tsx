@@ -445,7 +445,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [isComposing, setIsComposing] = useState(false);
+  const isComposingRef = useRef(false);
+  const hasCommittedRef = useRef(false);
 
   // Internal undo/redo history
   const { pushHistory, undo, redo, canUndo, canRedo } = useEditHistory(
@@ -476,6 +477,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     debounceMs: 50,
     onAccept: handleAutoCompleteAccept,
   });
+
+  // Reset commit guard when editing starts
+  useEffect(() => {
+    if (state.isEditing) {
+      hasCommittedRef.current = false;
+    }
+  }, [state.isEditing]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -520,7 +528,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
   // Handle input change with Point mode trigger detection
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isComposing) return;
+    if (isComposingRef.current) return;
 
     const newValue = e.target.value;
     const oldValue = state.value;
@@ -547,7 +555,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
         actions.setMode('point');
       }
     }
-  }, [actions, isComposing, state.value, state.mode, pushHistory]);
+  }, [actions, state.value, state.mode, pushHistory]);
 
   // Handle focus
   const handleFocus = useCallback(() => {
@@ -562,10 +570,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     onFocus?.();
   }, [state.isEditing, activeCell, actions, activeCellValue, onFocus]);
 
-  // Handle blur
+  // Handle blur - guards against IME composition and stale double-fires
   const handleBlur = useCallback((e: React.FocusEvent) => {
     setIsFocused(false);
     actions.setFormulaBarFocused(false);
+
+    // Don't process blur during IME composition — wait for compositionend
+    if (isComposingRef.current) return;
 
     // Check if focus moved to cell editor or another edit component
     const relatedTarget = e.relatedTarget as HTMLElement | null;
@@ -580,6 +591,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     }
     blurTimeoutRef.current = setTimeout(() => {
       blurTimeoutRef.current = null;
+      // Re-check composition (may have started between blur and timeout)
+      if (isComposingRef.current) return;
       if (!document.activeElement?.closest('[data-edit-component]') &&
           !document.activeElement?.closest('[data-cell-editor]')) {
         if (state.isEditing) {
@@ -589,13 +602,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     }, 0);
   }, [actions, state.isEditing]);
 
-  // Handle composition events (IME)
+  // Handle composition events (IME) - uses ref for synchronous guard
   const handleCompositionStart = useCallback(() => {
-    setIsComposing(true);
+    isComposingRef.current = true;
   }, []);
 
   const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLInputElement>) => {
-    setIsComposing(false);
+    isComposingRef.current = false;
     const value = (e.target as HTMLInputElement).value;
     const cursorPos = (e.target as HTMLInputElement).selectionStart ?? value.length;
     actions.setValue(value);
@@ -605,9 +618,9 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     });
   }, [actions, pushHistory]);
 
-  // Handle key events
+  // Handle key events - uses refs for IME guard, hasCommittedRef for repeat guard
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (isComposing) return;
+    if (isComposingRef.current) return;
 
     // Handle auto-complete navigation first when suggestions are visible
     if (autoCompleteState.showSuggestions) {
@@ -644,7 +657,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
-        if (state.isEditing) {
+        if (state.isEditing && !hasCommittedRef.current) {
+          hasCommittedRef.current = true;
           actions.confirmEdit();
           onEnter?.(e.shiftKey);
         }
@@ -652,7 +666,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
       case 'Tab':
         e.preventDefault();
-        if (state.isEditing) {
+        if (state.isEditing && !hasCommittedRef.current) {
+          hasCommittedRef.current = true;
           actions.confirmEdit();
           onTab?.(e.shiftKey);
         }
@@ -660,7 +675,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
       case 'Escape':
         e.preventDefault();
-        if (state.isEditing) {
+        if (state.isEditing && !hasCommittedRef.current) {
+          hasCommittedRef.current = true;
           actions.cancelEdit();
           onCancel?.();
         }
@@ -718,12 +734,12 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
         }
         break;
     }
-  }, [state.isEditing, actions, isComposing, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, canUndo, canRedo, undo, redo]);
+  }, [state.isEditing, actions, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, canUndo, canRedo, undo, redo]);
 
   // Sync selection changes from native input
   const handleSelect = useCallback(() => {
     const input = inputRef.current;
-    if (!input || isComposing || !state.isEditing) return;
+    if (!input || isComposingRef.current || !state.isEditing) return;
 
     const start = input.selectionStart ?? 0;
     const end = input.selectionEnd ?? 0;
@@ -733,7 +749,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     } else {
       actions.setCursorPosition(start);
     }
-  }, [actions, isComposing, state.isEditing]);
+  }, [actions, state.isEditing]);
 
   // Handle expand toggle
   const handleExpandToggle = useCallback(() => {

@@ -47,7 +47,7 @@
  * └─────────────────────────────────────────────────────────────────────────────┘
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StartEditIntent } from '../KeyboardAdapter';
 import type { IntentResult, SpreadsheetIntent } from '../IntentHandler';
 import type { SelectionState } from '../types';
@@ -159,6 +159,23 @@ export function useEditModeIntegration(
   const pointDragStateRef = useRef(pointDragState);
   pointDragStateRef.current = pointDragState;
 
+  // rAF-based throttle for drag updates (prevents 60+ state updates/sec)
+  const dragRafRef = useRef<number | null>(null);
+  const pendingDragCellRef = useRef<{ row: number; col: number } | null>(null);
+
+  // Debounce rapid same-cell clicks in point mode
+  const lastPointClickRef = useRef<{ row: number; col: number; time: number } | null>(null);
+
+  // Cleanup rAF on unmount
+  useEffect(() => {
+    return () => {
+      if (dragRafRef.current) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+    };
+  }, []);
+
   /**
    * Process an intent through the edit mode system
    */
@@ -212,6 +229,7 @@ export function useEditModeIntegration(
 
   /**
    * Handle cell click (for Point mode reference insertion)
+   * Deduplicates rapid clicks on the same cell to prevent double-insert
    */
   const handleCellClick = useCallback((
     row: number,
@@ -222,6 +240,19 @@ export function useEditModeIntegration(
 
     // In Point mode, clicking a cell inserts its reference
     if (currentEditState.isEditing && currentEditState.mode === 'point') {
+      // Deduplicate rapid clicks on the same cell (prevent double-insert)
+      const now = performance.now();
+      const lastClick = lastPointClickRef.current;
+      if (
+        lastClick &&
+        lastClick.row === row &&
+        lastClick.col === col &&
+        now - lastClick.time < 300
+      ) {
+        return {}; // Ignore duplicate
+      }
+      lastPointClickRef.current = { row, col, time: now };
+
       const ref = formatCellReference(row, col);
       editActions.insertCellReference(ref);
 
@@ -249,14 +280,25 @@ export function useEditModeIntegration(
 
   /**
    * Handle Point mode drag update
+   * Throttled with rAF to prevent 60+ state updates per second during drag
    */
   const handlePointModeDragUpdate = useCallback((row: number, col: number) => {
-    setPointDragState((prev) => {
-      if (!prev.isDragging || !prev.startCell) return prev;
-      return {
-        ...prev,
-        endCell: { row, col },
-      };
+    // Store latest cell for rAF callback (collapses rapid mousemove into 1/frame)
+    pendingDragCellRef.current = { row, col };
+    if (dragRafRef.current) return; // Already scheduled
+
+    dragRafRef.current = requestAnimationFrame(() => {
+      dragRafRef.current = null;
+      const cell = pendingDragCellRef.current;
+      if (!cell) return;
+
+      setPointDragState((prev) => {
+        if (!prev.isDragging || !prev.startCell) return prev;
+        return {
+          ...prev,
+          endCell: cell,
+        };
+      });
     });
   }, []);
 

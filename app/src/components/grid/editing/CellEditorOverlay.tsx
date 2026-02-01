@@ -325,6 +325,10 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   const [inputWidth, setInputWidth] = useState(cellPosition.width);
   const isComposingRef = useRef(false);
   const selectionBeforeResizeRef = useRef<{ start: number; end: number } | null>(null);
+  const cursorSyncRafRef = useRef<number | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  const hasCommittedRef = useRef(false);
+  const lastModeCycleRef = useRef(0);
 
   // Ref for state to avoid stale closures in stable callbacks
   const stateRef = useRef(state);
@@ -359,11 +363,19 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     onAccept: handleAutoCompleteAccept,
   });
 
-  // Cleanup timeouts on unmount
+  // Cleanup timeouts and rAFs on unmount
   useEffect(() => {
     return () => {
       timeoutRefs.current.forEach((id) => clearTimeout(id));
       timeoutRefs.current.clear();
+      if (cursorSyncRafRef.current) {
+        cancelAnimationFrame(cursorSyncRafRef.current);
+        cursorSyncRafRef.current = null;
+      }
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
     };
   }, []);
 
@@ -378,6 +390,13 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
 
   // Track initial focus state
   const hasInitialFocusRef = useRef(false);
+
+  // Reset commit guard when editing starts
+  useEffect(() => {
+    if (state.isEditing) {
+      hasCommittedRef.current = false;
+    }
+  }, [state.isEditing]);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -404,28 +423,42 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   }, [state.isEditing, isActive]);
 
   // Request scroll-into-view when editor might be off-screen
+  // Debounced with rAF to prevent layout thrashing during rapid position
+  // changes (auto-scroll, zoom, resize)
   useEffect(() => {
     if (state.isEditing && onScrollIntoView && containerRef.current) {
-      // Check if editor is visible in viewport
-      const rect = containerRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const viewportWidth = window.innerWidth;
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        if (!containerRef.current) return;
 
-      const isOffScreen =
-        rect.top < 0 ||
-        rect.left < 0 ||
-        rect.bottom > viewportHeight ||
-        rect.right > viewportWidth;
+        const rect = containerRef.current.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
 
-      if (isOffScreen) {
-        onScrollIntoView({
-          x: cellPosition.x,
-          y: cellPosition.y,
-          width: inputWidth,
-          height: cellPosition.height,
-        });
-      }
+        const isOffScreen =
+          rect.top < 0 ||
+          rect.left < 0 ||
+          rect.bottom > viewportHeight ||
+          rect.right > viewportWidth;
+
+        if (isOffScreen) {
+          onScrollIntoView({
+            x: cellPosition.x,
+            y: cellPosition.y,
+            width: inputWidth,
+            height: cellPosition.height,
+          });
+        }
+      });
     }
+
+    return () => {
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
   }, [state.isEditing, cellPosition, inputWidth, onScrollIntoView]);
 
   // Measure text and adjust width (preserving selection)
@@ -552,41 +585,61 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
-        actions.confirmEdit();
-        onEnter?.(e.shiftKey);
-        onClose?.();
+        if (!hasCommittedRef.current) {
+          hasCommittedRef.current = true;
+          actions.confirmEdit();
+          onEnter?.(e.shiftKey);
+          onClose?.();
+        }
         break;
 
       case 'Tab':
         e.preventDefault();
-        actions.confirmEdit();
-        onTab?.(e.shiftKey);
-        onClose?.();
+        if (!hasCommittedRef.current) {
+          hasCommittedRef.current = true;
+          actions.confirmEdit();
+          onTab?.(e.shiftKey);
+          onClose?.();
+        }
         break;
 
       case 'Escape':
         e.preventDefault();
-        actions.cancelEdit();
-        onClose?.();
+        if (!hasCommittedRef.current) {
+          hasCommittedRef.current = true;
+          actions.cancelEdit();
+          onClose?.();
+        }
         break;
 
-      case 'F2':
+      case 'F2': {
         e.preventDefault();
-        actions.cycleMode();
+        const now = performance.now();
+        if (now - lastModeCycleRef.current > 200) {
+          lastModeCycleRef.current = now;
+          actions.cycleMode();
+        }
         break;
+      }
 
       case 'ArrowLeft':
         if (currentState.mode === 'edit') {
-          safeTimeout(() => {
+          // rAF collapses rapid key-repeat into one cursor sync per frame
+          if (cursorSyncRafRef.current) cancelAnimationFrame(cursorSyncRafRef.current);
+          cursorSyncRafRef.current = requestAnimationFrame(() => {
+            cursorSyncRafRef.current = null;
             if (inputRef.current) {
               actions.setCursorPosition(inputRef.current.selectionStart ?? 0);
             }
-          }, 0);
+          });
         } else if (currentState.mode === 'enter') {
           e.preventDefault();
-          actions.confirmEdit();
-          onArrowNav?.('left');
-          onClose?.();
+          if (!hasCommittedRef.current) {
+            hasCommittedRef.current = true;
+            actions.confirmEdit();
+            onArrowNav?.('left');
+            onClose?.();
+          }
         } else if (currentState.mode === 'point') {
           e.preventDefault();
           onArrowNav?.('left');
@@ -595,16 +648,21 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
 
       case 'ArrowRight':
         if (currentState.mode === 'edit') {
-          safeTimeout(() => {
+          if (cursorSyncRafRef.current) cancelAnimationFrame(cursorSyncRafRef.current);
+          cursorSyncRafRef.current = requestAnimationFrame(() => {
+            cursorSyncRafRef.current = null;
             if (inputRef.current) {
               actions.setCursorPosition(inputRef.current.selectionStart ?? 0);
             }
-          }, 0);
+          });
         } else if (currentState.mode === 'enter') {
           e.preventDefault();
-          actions.confirmEdit();
-          onArrowNav?.('right');
-          onClose?.();
+          if (!hasCommittedRef.current) {
+            hasCommittedRef.current = true;
+            actions.confirmEdit();
+            onArrowNav?.('right');
+            onClose?.();
+          }
         } else if (currentState.mode === 'point') {
           e.preventDefault();
           onArrowNav?.('right');
@@ -615,9 +673,12 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         if (currentState.mode === 'enter' || currentState.mode === 'point') {
           e.preventDefault();
           if (currentState.mode === 'enter') {
-            actions.confirmEdit();
-            onArrowNav?.('up');
-            onClose?.();
+            if (!hasCommittedRef.current) {
+              hasCommittedRef.current = true;
+              actions.confirmEdit();
+              onArrowNav?.('up');
+              onClose?.();
+            }
           } else {
             onArrowNav?.('up');
           }
@@ -628,9 +689,12 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         if (currentState.mode === 'enter' || currentState.mode === 'point') {
           e.preventDefault();
           if (currentState.mode === 'enter') {
-            actions.confirmEdit();
-            onArrowNav?.('down');
-            onClose?.();
+            if (!hasCommittedRef.current) {
+              hasCommittedRef.current = true;
+              actions.confirmEdit();
+              onArrowNav?.('down');
+              onClose?.();
+            }
           } else {
             onArrowNav?.('down');
           }
@@ -696,7 +760,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         }
         break;
     }
-  }, [actions, onEnter, onTab, onClose, onArrowNav, safeTimeout,
+  }, [actions, onEnter, onTab, onClose, onArrowNav,
     autoCompleteState.showSuggestions, autoCompleteActions, undo, redo]);
 
   // Sync selection changes
@@ -714,14 +778,19 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     }
   }, [actions]);
 
-  // Handle blur
+  // Handle blur - guards against IME composition and stale double-fires
   const handleBlur = useCallback((e: React.FocusEvent) => {
+    // Don't process blur during IME composition — wait for compositionend
+    if (isComposingRef.current) return;
+
     const relatedTarget = e.relatedTarget as HTMLElement | null;
     if (relatedTarget?.dataset?.editComponent || relatedTarget?.dataset?.cellEditor) {
       return;
     }
 
     safeTimeout(() => {
+      // Re-check composition (may have started between blur and timeout)
+      if (isComposingRef.current) return;
       if (!document.activeElement?.closest('[data-edit-component]') &&
           !document.activeElement?.closest('[data-cell-editor]')) {
         actions.confirmEdit();

@@ -12,7 +12,7 @@
  * Note: Selection visuals are rendered by SelectionOverlay, not here.
  */
 
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useGridContext } from './GridContext';
 import type { RenderCell, CellFormat } from './types';
 
@@ -100,26 +100,37 @@ const Cell: React.FC<CellProps> = memo(
       [cell.row, cell.col, onDoubleClick]
     );
 
+    // Ref for number overflow detection (Excel-style #### hash fill)
+    const contentRef = useRef<HTMLSpanElement>(null);
+    const isNumberType = cell.valueType === 'number';
+
+    // Excel-style overflow: numbers that don't fit the cell show #### instead
+    // of ellipsis. Runs before paint (useLayoutEffect) so there's no flash.
+    useLayoutEffect(() => {
+      const el = contentRef.current;
+      if (!el || !isNumberType) return;
+
+      // Write real display value for measurement
+      el.textContent = cell.displayValue;
+
+      // If content overflows cell width, replace with hash fill.
+      // CSS overflow:hidden clips the excess — same visual as Excel.
+      if (el.scrollWidth > el.clientWidth + 1) {
+        const approxCharWidth = 8;
+        const count = Math.ceil(el.clientWidth / approxCharWidth) + 2;
+        el.textContent = '#'.repeat(count);
+      }
+    }, [cell.displayValue, cell.width, isNumberType]);
+
     // Skip hidden merged cells
     if (cell.merge?.isHidden) {
       return null;
     }
 
-    // Compute styles from format
+    // Compute styles from format.
+    // Conditional formatting overrides (formatOverrides + colorScale) are
+    // pre-merged into cell.format by the adapter — no override logic here.
     const formatStyles = formatToStyles(cell.format);
-
-    // Apply conditional formatting overrides
-    if (cell.conditionalFormat?.formatOverrides) {
-      Object.assign(
-        formatStyles,
-        formatToStyles(cell.conditionalFormat.formatOverrides)
-      );
-    }
-
-    // Apply color scale background
-    if (cell.conditionalFormat?.colorScale) {
-      formatStyles.backgroundColor = cell.conditionalFormat.colorScale;
-    }
 
     // Position styles (subtract header offset since we're inside scroll container)
     const positionStyles: React.CSSProperties = {
@@ -138,6 +149,12 @@ const Cell: React.FC<CellProps> = memo(
 
     // Validation error indicator
     const hasValidationError = cell.validation?.isValid === false;
+
+    // Content class: numbers clip without ellipsis (hash fill instead),
+    // text/other types truncate with ellipsis.
+    const contentClass = isNumberType
+      ? 'w-full relative z-10 overflow-hidden whitespace-nowrap block'
+      : 'truncate w-full relative z-10';
 
     return (
       <div
@@ -171,13 +188,12 @@ const Cell: React.FC<CellProps> = memo(
           <span
             className={`flex-shrink-0 ${cell.conditionalFormat.icon.position === 'right' ? 'order-last ml-1' : 'mr-1'}`}
           >
-            {/* Icon would be rendered here based on type */}
             {cell.conditionalFormat.icon.type}
           </span>
         )}
 
         {/* Cell content */}
-        <span className="truncate w-full relative z-10">{cell.displayValue}</span>
+        <span ref={contentRef} className={contentClass}>{cell.displayValue}</span>
 
         {/* Validation error indicator (red triangle) */}
         {hasValidationError && (
@@ -256,16 +272,31 @@ export const CellLayer: React.FC<CellLayerProps> = memo(
       onCellDoubleClick,
     } = useGridContext();
 
+    // Memoize header offset to avoid new object on every render
+    // (CellLayer re-renders on context changes including selection, but headerOffset is stable)
+    const headerOffset = useMemo(
+      () => ({ x: config.rowHeaderWidth, y: config.colHeaderHeight }),
+      [config.rowHeaderWidth, config.colHeaderHeight]
+    );
+
+    // Memoize cell elements so selection-only context changes skip O(visibleCells) work.
+    // During drag selection, frame doesn't change — only selection does. Without this,
+    // CellLayer would re-run .map() over all visible cells on every mousemove.
+    const cellElements = useMemo(() => {
+      if (!frame) return null;
+      return frame.cells.map((cell) => (
+        <Cell
+          key={`${cell.row}-${cell.col}`}
+          cell={cell}
+          headerOffset={headerOffset}
+          onClick={onCellClick}
+          onDoubleClick={onCellDoubleClick}
+        />
+      ));
+    }, [frame, headerOffset, onCellClick, onCellDoubleClick]);
+
     // No frame = nothing to render
     if (!frame) return null;
-
-    // Header offset for adjusting cell positions
-    // (cells come with screen coordinates including headers, but we're
-    // inside a container that's already offset by headers)
-    const headerOffset = {
-      x: config.rowHeaderWidth,
-      y: config.colHeaderHeight,
-    };
 
     return (
       <div
@@ -281,16 +312,8 @@ export const CellLayer: React.FC<CellLayerProps> = memo(
         aria-rowcount={frame.visibleRange.endRow - frame.visibleRange.startRow + 1}
         aria-colcount={frame.visibleRange.endCol - frame.visibleRange.startCol + 1}
       >
-        {/* Render all visible cells */}
-        {frame.cells.map((cell) => (
-          <Cell
-            key={`${cell.row}-${cell.col}`}
-            cell={cell}
-            headerOffset={headerOffset}
-            onClick={onCellClick}
-            onDoubleClick={onCellDoubleClick}
-          />
-        ))}
+        {/* Render all visible cells (memoized — skipped when only selection changed) */}
+        {cellElements}
 
         {/* Freeze pane divider lines */}
         <FreezeLines
