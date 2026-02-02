@@ -462,3 +462,150 @@ body {
   border-radius: 2px;
   pointer-events: none;
 }
+
+/* =============================================================================
+   Ribbon / Toolbar
+   ============================================================================= */
+
+:root {
+  --ribbon-height: 36px;
+  --ribbon-btn-size: 28px;
+}
+
+.ribbon {
+  display: flex;
+  align-items: center;
+  height: var(--ribbon-height);
+  padding: 0 8px;
+  gap: 2px;
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-primary);
+  user-select: none;
+}
+
+.ribbon-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.ribbon-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--color-border-primary);
+  margin: 0 4px;
+}
+
+.ribbon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ribbon-btn-size);
+  height: var(--ribbon-btn-size);
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ribbon-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-primary);
+}
+
+.ribbon-btn:active:not(:disabled) {
+  background: #cdd5de;
+  border-color: var(--color-border-secondary);
+}
+
+.ribbon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-btn[aria-pressed="true"] {
+  background: #d6e4f0;
+  border-color: #b0cfe0;
+}
+
+.ribbon-btn[aria-pressed="true"]:hover:not(:disabled) {
+  background: #c4d8ec;
+  border-color: #9abdd4;
+}
+
+.ribbon-btn[aria-pressed="true"]:active:not(:disabled) {
+  background: #b2cce4;
+  border-color: #89b0c8;
+}
+
+.ribbon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4);
+}
+
+.ribbon-dropdown {
+  height: var(--ribbon-btn-size);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 3px;
+  background: white;
+  font-size: 11px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.ribbon-dropdown:hover:not(:disabled) {
+  border-color: var(--color-border-focus);
+}
+
+.ribbon-dropdown:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-dropdown:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4);
+}
+
+.ribbon-color-indicator {
+  width: 14px;
+  height: 3px;
+  margin-top: 1px;
+  border-radius: 1px;
+}
+
+.ribbon-color-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.ribbon-color-swatch:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4);
+  z-index: 1;
+}
+
+.ribbon-color-swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.6);
+  z-index: 1;
+}
+
+/* Selected swatch — visible ring so users see their current color */
+.ribbon-color-swatch-selected {
+  box-shadow: 0 0 0 2px #1a73e8;
+  border-color: #1a73e8;
+  z-index: 1;
+}
+
+.ribbon-color-swatch-selected:hover {
+  box-shadow: 0 0 0 2px #1557b0;
+}

@@ -1,19 +1,34 @@
 /**
- * TopBar - Application header with toolbar/ribbon placeholder
+ * TopBar - Application header with menu bar and Ribbon toolbar
  *
- * Currently provides:
- * - Application branding
- * - Menu bar placeholder
- * - Formula bar
+ * Layout:
+ * ┌─────────────────────────────────────────────────┐
+ * │ Logo │ File Edit View Insert Format Help │ Share │  ← MenuBar row
+ * ├─────────────────────────────────────────────────┤
+ * │ [Clipboard] │ [History] │ [Font] │ [Align] │ …  │  ← Ribbon row
+ * └─────────────────────────────────────────────────┘
  *
- * Future: Will contain ribbon tabs, quick access toolbar, etc.
+ * The FormulaBar lives inside GridViewport (not here).
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Ribbon } from './ribbon';
+import type { RibbonState } from './ribbon';
+import type { SpreadsheetIntent } from './grid/IntentHandler';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 export interface TopBarProps {
   /** Optional class name */
   className?: string;
+  /** Ribbon state from parent */
+  ribbonState?: RibbonState;
+  /** Intent emitter for ribbon buttons */
+  onIntent?: (intent: SpreadsheetIntent) => void;
+  /** Format painter toggle callback */
+  onFormatPainterToggle?: () => void;
 }
 
 /** Menu item structure */
@@ -67,23 +82,50 @@ const MENUS: Record<string, MenuItem[]> = {
   ],
 };
 
-export const TopBar: React.FC<TopBarProps> = ({ className = '' }) => {
+// =============================================================================
+// Component
+// =============================================================================
+
+export const TopBar: React.FC<TopBarProps> = ({
+  className = '',
+  ribbonState,
+  onIntent,
+  onFormatPainterToggle,
+}) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [cellAddress, setCellAddress] = useState('A1');
-  const [formulaValue, setFormulaValue] = useState('');
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Cancel pending blur timeout on unmount
+  useEffect(() => () => { clearTimeout(blurTimerRef.current); }, []);
 
   const handleMenuClick = (menu: string) => {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
-  const handleMenuBlur = () => {
-    // Delay to allow click events on menu items
-    setTimeout(() => setActiveMenu(null), 150);
-  };
+  // Hover-to-open: when one menu is already open, hovering another opens it
+  const handleMenuMouseEnter = useCallback((menu: string) => {
+    if (activeMenu && activeMenu !== menu) {
+      setActiveMenu(menu);
+    }
+  }, [activeMenu]);
+
+  const handleMenuBlur = useCallback(() => {
+    // Delay to allow click events on menu items to fire first
+    clearTimeout(blurTimerRef.current);
+    blurTimerRef.current = setTimeout(() => setActiveMenu(null), 150);
+  }, []);
+
+  // Close menus on Escape key
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape' && activeMenu) {
+      setActiveMenu(null);
+      e.stopPropagation();
+    }
+  }, [activeMenu]);
 
   return (
     <header className={`topbar flex flex-col border-b border-gray-200 bg-white ${className}`}>
-      {/* Title Bar / Menu Bar */}
+      {/* Menu Bar */}
       <div className="flex items-center h-10 px-2 border-b border-gray-100 bg-gray-50/50">
         {/* Logo / Brand */}
         <div className="flex items-center gap-2 mr-4">
@@ -96,16 +138,18 @@ export const TopBar: React.FC<TopBarProps> = ({ className = '' }) => {
         </div>
 
         {/* Menu Bar */}
-        <nav className="flex items-center gap-0.5 relative" onBlur={handleMenuBlur}>
+        <nav className="flex items-center gap-0.5 relative" onBlur={handleMenuBlur} onKeyDown={handleMenuKeyDown}>
           {Object.keys(MENUS).map((menu) => (
             <div key={menu} className="relative">
               <button
+                type="button"
                 className={`px-3 py-1 text-sm rounded transition-colors ${
                   activeMenu === menu
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
                 onClick={() => handleMenuClick(menu)}
+                onMouseEnter={() => handleMenuMouseEnter(menu)}
               >
                 {menu}
               </button>
@@ -115,6 +159,7 @@ export const TopBar: React.FC<TopBarProps> = ({ className = '' }) => {
                 <div className="absolute top-full left-0 mt-0.5 w-56 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50">
                   {MENUS[menu].map((item, idx) => (
                     <button
+                      type="button"
                       key={idx}
                       className={`w-full px-3 py-1.5 text-left text-sm flex items-center justify-between ${
                         item.disabled
@@ -148,39 +193,14 @@ export const TopBar: React.FC<TopBarProps> = ({ className = '' }) => {
         </div>
       </div>
 
-      {/* Formula Bar */}
-      <div className="flex items-center h-7 px-2 gap-2 bg-white">
-        {/* Cell Address Box */}
-        <div className="relative">
-          <input
-            type="text"
-            value={cellAddress}
-            onChange={(e) => setCellAddress(e.target.value.toUpperCase())}
-            className="w-20 h-5 px-2 text-xs font-mono text-center border border-gray-300 rounded focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            aria-label="Cell address"
-          />
-        </div>
-
-        {/* Function button */}
-        <button
-          className="flex items-center justify-center w-6 h-5 text-gray-500 hover:bg-gray-100 rounded"
-          title="Insert function"
-        >
-          <FunctionIcon className="w-3.5 h-3.5" />
-        </button>
-
-        {/* Formula Input */}
-        <div className="flex-1 relative">
-          <input
-            type="text"
-            value={formulaValue}
-            onChange={(e) => setFormulaValue(e.target.value)}
-            placeholder="Enter value or formula"
-            className="w-full h-5 px-2 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            aria-label="Formula bar"
-          />
-        </div>
-      </div>
+      {/* Ribbon Toolbar */}
+      {ribbonState && onIntent && (
+        <Ribbon
+          state={ribbonState}
+          onIntent={onIntent}
+          onFormatPainterToggle={onFormatPainterToggle}
+        />
+      )}
     </header>
   );
 };
@@ -194,14 +214,6 @@ const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
       strokeWidth={2}
       d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
     />
-  </svg>
-);
-
-const FunctionIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <text x="4" y="18" fontSize="16" fontFamily="serif" fontStyle="italic">
-      fx
-    </text>
   </svg>
 );
 

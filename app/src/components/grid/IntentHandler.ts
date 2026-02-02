@@ -43,8 +43,10 @@ import type {
   NavigateHomeEndIntent,
   TabEnterNavigateIntent,
   StartEditIntent,
+  ApplyFormatIntent,
 } from './KeyboardAdapter';
 import type { SelectionState, SelectionRange } from './types';
+import type { CellFormat } from '../../../../engine/core/types/index';
 
 /**
  * Union type of all intents (pointer + keyboard)
@@ -104,6 +106,10 @@ export interface IntentResult {
   deleteContents?: boolean;
   /** Clipboard action */
   clipboard?: 'copy' | 'cut' | 'paste';
+  /** Format to apply to selected cells */
+  applyFormat?: Partial<CellFormat>;
+  /** Undo/redo action */
+  undoRedo?: 'undo' | 'redo';
 }
 
 // =============================================================================
@@ -237,6 +243,12 @@ export class IntentHandler {
 
       case 'ClipboardAction':
         return { clipboard: intent.action };
+
+      case 'ApplyFormat':
+        return { applyFormat: (intent as ApplyFormatIntent).format };
+
+      case 'UndoRedo':
+        return { undoRedo: (intent as { action: 'undo' | 'redo' }).action };
 
       default:
         return {};

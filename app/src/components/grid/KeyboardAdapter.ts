@@ -60,7 +60,10 @@ import {
   type SelectionIntent as EngineSelectionIntent,
   type DeleteIntent,
   type ClipboardIntent,
+  type HistoryIntent,
+  type FormatIntent,
 } from '../../../../engine/core/navigation/KeyboardHandler';
+import type { CellFormat } from '../../../../engine/core/types/index';
 
 // =============================================================================
 // Keyboard Intent Types (UI Layer)
@@ -166,6 +169,22 @@ export interface ClipboardActionIntent extends BaseKeyboardIntent {
 }
 
 /**
+ * Apply cell formatting (Bold, Italic, font changes, etc.)
+ */
+export interface ApplyFormatIntent extends BaseKeyboardIntent {
+  type: 'ApplyFormat';
+  format: Partial<CellFormat>;
+}
+
+/**
+ * Undo / Redo
+ */
+export interface UndoRedoIntent extends BaseKeyboardIntent {
+  type: 'UndoRedo';
+  action: 'undo' | 'redo';
+}
+
+/**
  * Union of all keyboard intents
  */
 export type KeyboardIntent =
@@ -179,7 +198,9 @@ export type KeyboardIntent =
   | EscapePressedIntent
   | SelectAllCellsIntent
   | DeleteContentsIntent
-  | ClipboardActionIntent;
+  | ClipboardActionIntent
+  | ApplyFormatIntent
+  | UndoRedoIntent;
 
 // =============================================================================
 // Intent Creation Helpers
@@ -294,11 +315,32 @@ function convertEngineIntent(engineIntent: EngineIntent): KeyboardIntent | null 
       });
     }
 
+    case 'history': {
+      const hist = engineIntent as HistoryIntent;
+      return createIntent<UndoRedoIntent>({
+        type: 'UndoRedo',
+        action: hist.action,
+      });
+    }
+
+    case 'format': {
+      const fmt = engineIntent as FormatIntent;
+      const formatMap: Record<string, Partial<CellFormat>> = {
+        bold: { bold: true },
+        italic: { italic: true },
+        underline: { underline: 1 },
+        strikethrough: { strikethrough: true },
+      };
+      const format = formatMap[fmt.action];
+      if (format) {
+        return createIntent<ApplyFormatIntent>({ type: 'ApplyFormat', format });
+      }
+      return null;
+    }
+
     // Intents not forwarded to UI (handled elsewhere or not implemented)
     case 'goTo':
     case 'cellClick':
-    case 'history':
-    case 'format':
     case 'dialog':
     case 'file':
     case 'unknown':

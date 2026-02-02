@@ -15,3 +15,6 @@ export type { GridViewportProps } from './GridViewport';
 
 export { StatusBar } from './StatusBar';
 export type { StatusBarProps } from './StatusBar';
+
+export { Ribbon } from './ribbon';
+export type { RibbonProps, RibbonState } from './ribbon';
