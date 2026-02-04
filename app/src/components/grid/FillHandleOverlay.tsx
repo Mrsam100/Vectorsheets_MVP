@@ -48,7 +48,8 @@ interface RangeRect {
 // =============================================================================
 
 // Numeric key avoids per-cell string allocation during Map.set (hot path on scroll)
-const CELL_KEY_COLS = 16384;
+// Must exceed max column index (16383) to prevent key collisions at boundary
+const CELL_KEY_COLS = 16385;
 function cellKey(row: number, col: number): number {
   return row * CELL_KEY_COLS + col;
 }
@@ -163,7 +164,7 @@ function calculateRangeRect(
 
 interface FillHandleSquareProps {
   rect: RangeRect;
-  onMouseDown: (e: React.MouseEvent) => void;
+  onMouseDown: (e: React.PointerEvent | React.MouseEvent) => void;
 }
 
 const FillHandleSquare: React.FC<FillHandleSquareProps> = memo(({ rect, onMouseDown }) => {
@@ -172,24 +173,16 @@ const FillHandleSquare: React.FC<FillHandleSquareProps> = memo(({ rect, onMouseD
       className="fill-handle absolute cursor-crosshair"
       style={{
         // Position at bottom-right corner of the range rect
+        // Only positioning & z-index here — colors/transitions in CSS so :hover/:active work
         left: rect.x + rect.width - 5,
         top: rect.y + rect.height - 5,
         width: 10,
         height: 10,
-        backgroundColor: '#2563eb',
-        border: '2px solid white',
-        borderRadius: 1,
         zIndex: 51,
         pointerEvents: 'auto',
-        transition: 'transform 100ms ease-out, background-color 100ms ease-out',
+        touchAction: 'none',
       }}
-      onMouseDown={onMouseDown}
-      onMouseEnter={(e) => {
-        (e.target as HTMLElement).style.transform = 'scale(1.2)';
-      }}
-      onMouseLeave={(e) => {
-        (e.target as HTMLElement).style.transform = 'scale(1)';
-      }}
+      onPointerDown={onMouseDown}
       role="button"
       aria-label="Fill handle - drag to fill cells"
       tabIndex={-1}
@@ -216,8 +209,8 @@ const FillDragPreview: React.FC<FillDragPreviewProps> = memo(({ rect }) => {
         width: rect.width,
         height: rect.height,
         willChange: 'transform',
-        border: '2px dashed rgba(59, 130, 246, 0.6)',
-        backgroundColor: 'rgba(59, 130, 246, 0.04)',
+        border: '2px dashed var(--color-selection-border)',
+        backgroundColor: 'var(--color-selection-secondary-fill)',
         boxSizing: 'border-box',
         zIndex: 41,
         pointerEvents: 'none',
@@ -291,6 +284,7 @@ export const FillHandleOverlay: React.FC<FillHandleOverlayProps> = memo(
     // Show handle: visible active cell, single contiguous selection, not dragging/editing/painting
     const showHandle =
       primaryRangeRect !== null &&
+      selection.activeCell !== null &&
       !isDragging &&
       !isEditing &&
       !isFormatPainterActive &&

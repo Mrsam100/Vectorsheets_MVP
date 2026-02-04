@@ -11,7 +11,7 @@
  * The FormulaBar lives inside GridViewport (not here).
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { Ribbon } from './ribbon';
 import type { RibbonState } from './ribbon';
 import type { SpreadsheetIntent } from './grid/IntentHandler';
@@ -36,57 +36,62 @@ interface MenuItem {
   label: string;
   shortcut?: string;
   disabled?: boolean;
+  /** Action key for dispatching via onIntent */
+  action?: string;
 }
 
 /** Menu structure */
 const MENUS: Record<string, MenuItem[]> = {
   File: [
-    { label: 'New', shortcut: 'Ctrl+N' },
-    { label: 'Open', shortcut: 'Ctrl+O' },
-    { label: 'Save', shortcut: 'Ctrl+S' },
-    { label: 'Save As...', shortcut: 'Ctrl+Shift+S' },
+    { label: 'New', shortcut: 'Ctrl+N', disabled: true },
+    { label: 'Open', shortcut: 'Ctrl+O', disabled: true },
+    { label: 'Save', shortcut: 'Ctrl+S', disabled: true },
+    { label: 'Save As...', shortcut: 'Ctrl+Shift+S', disabled: true },
     { label: 'Export', disabled: true },
   ],
   Edit: [
-    { label: 'Undo', shortcut: 'Ctrl+Z' },
-    { label: 'Redo', shortcut: 'Ctrl+Y' },
-    { label: 'Cut', shortcut: 'Ctrl+X' },
-    { label: 'Copy', shortcut: 'Ctrl+C' },
-    { label: 'Paste', shortcut: 'Ctrl+V' },
+    { label: 'Undo', shortcut: 'Ctrl+Z', action: 'undo' },
+    { label: 'Redo', shortcut: 'Ctrl+Y', action: 'redo' },
+    { label: 'Cut', shortcut: 'Ctrl+X', action: 'cut' },
+    { label: 'Copy', shortcut: 'Ctrl+C', action: 'copy' },
+    { label: 'Paste', shortcut: 'Ctrl+V', action: 'paste' },
   ],
   View: [
-    { label: 'Zoom In', shortcut: 'Ctrl+=' },
-    { label: 'Zoom Out', shortcut: 'Ctrl+-' },
-    { label: 'Reset Zoom', shortcut: 'Ctrl+0' },
-    { label: 'Show Gridlines' },
-    { label: 'Show Headers' },
+    { label: 'Zoom In', shortcut: 'Ctrl+=', disabled: true },
+    { label: 'Zoom Out', shortcut: 'Ctrl+-', disabled: true },
+    { label: 'Reset Zoom', shortcut: 'Ctrl+0', disabled: true },
+    { label: 'Show Gridlines', disabled: true },
+    { label: 'Show Headers', disabled: true },
   ],
   Insert: [
-    { label: 'Rows Above' },
-    { label: 'Rows Below' },
-    { label: 'Columns Left' },
-    { label: 'Columns Right' },
+    { label: 'Rows Above', action: 'insertRowAbove' },
+    { label: 'Rows Below', action: 'insertRowBelow' },
+    { label: 'Columns Left', action: 'insertColLeft' },
+    { label: 'Columns Right', action: 'insertColRight' },
     { label: 'Chart', disabled: true },
   ],
   Format: [
-    { label: 'Bold', shortcut: 'Ctrl+B' },
-    { label: 'Italic', shortcut: 'Ctrl+I' },
-    { label: 'Underline', shortcut: 'Ctrl+U' },
-    { label: 'Number Format...' },
-    { label: 'Conditional Formatting...' },
+    { label: 'Bold', shortcut: 'Ctrl+B', action: 'bold' },
+    { label: 'Italic', shortcut: 'Ctrl+I', action: 'italic' },
+    { label: 'Underline', shortcut: 'Ctrl+U', action: 'underline' },
+    { label: 'Number Format...', disabled: true },
+    { label: 'Conditional Formatting...', disabled: true },
   ],
   Help: [
-    { label: 'Documentation' },
-    { label: 'Keyboard Shortcuts' },
-    { label: 'About VectorSheet' },
+    { label: 'Documentation', disabled: true },
+    { label: 'Keyboard Shortcuts', shortcut: 'Ctrl+/', action: 'keyboardShortcuts' },
+    { label: 'About VectorSheet', disabled: true },
   ],
 };
+
+/** Menu names — hoisted so handleMenuKeyDown doesn't recreate on every render */
+const MENU_KEYS = Object.keys(MENUS);
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export const TopBar: React.FC<TopBarProps> = ({
+const TopBarInner: React.FC<TopBarProps> = ({
   className = '',
   ribbonState,
   onIntent,
@@ -102,52 +107,200 @@ export const TopBar: React.FC<TopBarProps> = ({
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
+  // Dispatch menu item actions via onIntent
+  const handleMenuItemClick = useCallback((action: string | undefined) => {
+    if (!action || !onIntent) return;
+    setActiveMenu(null);
+    switch (action) {
+      case 'undo':
+        onIntent({ type: 'UndoRedo', action: 'undo' } as SpreadsheetIntent);
+        break;
+      case 'redo':
+        onIntent({ type: 'UndoRedo', action: 'redo' } as SpreadsheetIntent);
+        break;
+      case 'cut':
+        onIntent({ type: 'ClipboardAction', action: 'cut' } as SpreadsheetIntent);
+        break;
+      case 'copy':
+        onIntent({ type: 'ClipboardAction', action: 'copy' } as SpreadsheetIntent);
+        break;
+      case 'paste':
+        onIntent({ type: 'ClipboardAction', action: 'paste' } as SpreadsheetIntent);
+        break;
+      case 'bold':
+        onIntent({ type: 'ApplyFormat', format: { bold: !ribbonState?.activeCellFormat?.bold } } as SpreadsheetIntent);
+        break;
+      case 'italic':
+        onIntent({ type: 'ApplyFormat', format: { italic: !ribbonState?.activeCellFormat?.italic } } as SpreadsheetIntent);
+        break;
+      case 'underline':
+        onIntent({ type: 'ApplyFormat', format: { underline: ribbonState?.activeCellFormat?.underline ? 0 : 1 } } as SpreadsheetIntent);
+        break;
+      case 'insertRowAbove':
+        onIntent({ type: 'InsertRows', row: -1, count: 1, timestamp: Date.now() } as SpreadsheetIntent);
+        break;
+      case 'insertRowBelow':
+        onIntent({ type: 'InsertRows', row: -2, count: 1, timestamp: Date.now() } as SpreadsheetIntent);
+        break;
+      case 'insertColLeft':
+        onIntent({ type: 'InsertColumns', col: -1, count: 1, timestamp: Date.now() } as SpreadsheetIntent);
+        break;
+      case 'insertColRight':
+        onIntent({ type: 'InsertColumns', col: -2, count: 1, timestamp: Date.now() } as SpreadsheetIntent);
+        break;
+      case 'keyboardShortcuts':
+        onIntent({ type: 'OpenKeyboardShortcuts', timestamp: Date.now() } as unknown as SpreadsheetIntent);
+        break;
+    }
+  }, [onIntent, ribbonState]);
+
   // Hover-to-open: when one menu is already open, hovering another opens it
   const handleMenuMouseEnter = useCallback((menu: string) => {
+    clearTimeout(blurTimerRef.current); // Cancel pending blur from leaving previous menu
     if (activeMenu && activeMenu !== menu) {
       setActiveMenu(menu);
     }
   }, [activeMenu]);
 
-  const handleMenuBlur = useCallback(() => {
+  const handleMenuBlur = useCallback((e: React.FocusEvent) => {
+    // If focus moved to another element inside the nav, do not close
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     // Delay to allow click events on menu items to fire first
     clearTimeout(blurTimerRef.current);
     blurTimerRef.current = setTimeout(() => setActiveMenu(null), 150);
   }, []);
 
-  // Close menus on Escape key
+  // Keyboard navigation for menubar (WAI-ARIA menubar pattern)
+  const pendingFocusRef = useRef(false);
+
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape' && activeMenu) {
+      // Restore focus to the trigger button that owns the open menu
+      const nav = e.currentTarget as HTMLElement;
+      const idx = MENU_KEYS.indexOf(activeMenu);
       setActiveMenu(null);
+      if (idx >= 0) {
+        const buttons = nav.querySelectorAll<HTMLButtonElement>(':scope > div > button');
+        buttons[idx]?.focus();
+      }
       e.stopPropagation();
+      return;
+    }
+
+    // ArrowLeft/Right: navigate between top-level menu buttons
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const buttons = Array.from(
+        (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(':scope > div > button')
+      );
+      const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (idx === -1) return;
+      const next = e.key === 'ArrowRight'
+        ? (idx + 1) % buttons.length
+        : (idx - 1 + buttons.length) % buttons.length;
+      buttons[next].focus();
+      if (activeMenu) {
+        setActiveMenu(MENU_KEYS[next]);
+        pendingFocusRef.current = true;
+      }
+      return;
+    }
+
+    // ArrowDown: open menu and focus first item, or navigate within open dropdown
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (activeMenu) {
+        const menuEl = (e.currentTarget as HTMLElement).querySelector('[role="menu"]');
+        if (menuEl) {
+          const items = Array.from(menuEl.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+          const currentIdx = items.indexOf(document.activeElement as HTMLButtonElement);
+          if (currentIdx === -1) {
+            items[0]?.focus();
+          } else {
+            items[(currentIdx + 1) % items.length]?.focus();
+          }
+        }
+      } else {
+        // Open the focused menu and focus first item
+        const buttons = Array.from(
+          (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(':scope > div > button')
+        );
+        const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        if (idx >= 0 && idx < MENU_KEYS.length) {
+          setActiveMenu(MENU_KEYS[idx]);
+          pendingFocusRef.current = true;
+        }
+      }
+      return;
+    }
+
+    // ArrowUp: navigate within open dropdown
+    if (e.key === 'ArrowUp' && activeMenu) {
+      e.preventDefault();
+      const menuEl = (e.currentTarget as HTMLElement).querySelector('[role="menu"]');
+      if (menuEl) {
+        const items = Array.from(menuEl.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+        const currentIdx = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (currentIdx <= 0) {
+          items[items.length - 1]?.focus();
+        } else {
+          items[currentIdx - 1]?.focus();
+        }
+      }
+      return;
+    }
+
+    // Home/End within open dropdown
+    if ((e.key === 'Home' || e.key === 'End') && activeMenu) {
+      e.preventDefault();
+      const menuEl = (e.currentTarget as HTMLElement).querySelector('[role="menu"]');
+      if (menuEl) {
+        const items = Array.from(menuEl.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+        if (items.length > 0) {
+          (e.key === 'Home' ? items[0] : items[items.length - 1]).focus();
+        }
+      }
     }
   }, [activeMenu]);
 
+  // Focus first dropdown item after menu opens via keyboard (ArrowDown / ArrowLeft/Right)
+  useEffect(() => {
+    if (!activeMenu || !pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    const rafId = requestAnimationFrame(() => {
+      const menuEl = document.querySelector<HTMLElement>(`[role="menu"][aria-label="${activeMenu} menu"]`);
+      if (menuEl) {
+        const firstItem = menuEl.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+        firstItem?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [activeMenu]);
+
   return (
-    <header className={`topbar flex flex-col border-b border-gray-200 bg-white ${className}`}>
+    <header className={`topbar flex flex-col border-b ${className}`}>
       {/* Menu Bar */}
-      <div className="flex items-center h-10 px-2 border-b border-gray-100 bg-gray-50/50">
+      <div className="topbar-menubar flex items-center h-10 px-2 border-b">
         {/* Logo / Brand */}
         <div className="flex items-center gap-2 mr-4">
           <div className="w-6 h-6 rounded bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
-            <span className="text-white text-xs font-bold">V</span>
+            <span className="text-xs font-bold" style={{ color: 'var(--color-text-on-accent)' }}>V</span>
           </div>
-          <span className="text-sm font-semibold text-gray-700 hidden sm:inline">
+          <span className="topbar-brand-text text-sm font-semibold hidden sm:inline">
             VectorSheet
           </span>
         </div>
 
         {/* Menu Bar */}
-        <nav className="flex items-center gap-0.5 relative" onBlur={handleMenuBlur} onKeyDown={handleMenuKeyDown}>
+        <nav className="flex items-center gap-0.5 relative" role="menubar" aria-label="Application menu" onBlur={handleMenuBlur} onKeyDown={handleMenuKeyDown}>
           {Object.keys(MENUS).map((menu) => (
             <div key={menu} className="relative">
               <button
                 type="button"
-                className={`px-3 py-1 text-sm rounded transition-colors ${
-                  activeMenu === menu
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                role="menuitem"
+                aria-haspopup="true"
+                aria-expanded={activeMenu === menu}
+                className={`topbar-menu-trigger px-3 py-1 text-sm rounded transition-colors`}
                 onClick={() => handleMenuClick(menu)}
                 onMouseEnter={() => handleMenuMouseEnter(menu)}
               >
@@ -156,21 +309,22 @@ export const TopBar: React.FC<TopBarProps> = ({
 
               {/* Dropdown Menu */}
               {activeMenu === menu && (
-                <div className="absolute top-full left-0 mt-0.5 w-56 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50">
-                  {MENUS[menu].map((item, idx) => (
+                <div className="topbar-dropdown absolute top-full left-0 mt-0.5 w-56 rounded-md py-1 z-50" role="menu" aria-label={`${menu} menu`}>
+                  {MENUS[menu].map((item) => (
                     <button
                       type="button"
-                      key={idx}
-                      className={`w-full px-3 py-1.5 text-left text-sm flex items-center justify-between ${
-                        item.disabled
-                          ? 'text-gray-400 cursor-not-allowed'
-                          : 'text-gray-700 hover:bg-gray-100'
+                      role="menuitem"
+                      key={item.label}
+                      className={`topbar-menu-item w-full px-3 py-1.5 text-left text-sm flex items-center justify-between ${
+                        item.disabled ? 'cursor-not-allowed' : ''
                       }`}
                       disabled={item.disabled}
+                      aria-disabled={item.disabled || undefined}
+                      onClick={item.action ? () => handleMenuItemClick(item.action) : undefined}
                     >
                       <span>{item.label}</span>
                       {item.shortcut && (
-                        <span className="text-xs text-gray-400 ml-4">
+                        <span className="topbar-shortcut text-xs ml-4">
                           {item.shortcut}
                         </span>
                       )}
@@ -187,8 +341,8 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Right side actions (placeholder) */}
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Share">
-            <ShareIcon className="w-4 h-4 text-gray-500" />
+          <button className="icon-btn" title="Share" aria-label="Share" style={{ color: 'var(--color-text-muted)' }}>
+            <ShareIcon className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -217,4 +371,7 @@ const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+TopBarInner.displayName = 'TopBar';
+
+export const TopBar = memo(TopBarInner);
 export default TopBar;

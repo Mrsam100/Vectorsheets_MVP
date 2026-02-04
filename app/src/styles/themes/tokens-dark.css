@@ -1,0 +1,174 @@
+/**
+ * Dark Theme Tokens — VectorSheet dark mode
+ *
+ * Activated via [data-vs-theme="dark"] on <html>.
+ * Overrides the same variable names declared in tokens-light.css.
+ * Palette inspired by VS Code dark theme for familiarity.
+ */
+
+[data-vs-theme="dark"] {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------------------------------
+     Surface
+     --------------------------------------------------------------------------- */
+  --color-bg-primary: #1e1e1e;
+  --color-bg-secondary: #252526;
+  --color-bg-tertiary: #2d2d30;
+  --color-bg-hover: #3e3e42;
+  --color-bg-surface: #252526;
+
+  /* ---------------------------------------------------------------------------
+     Text
+     --------------------------------------------------------------------------- */
+  --color-text-primary: #cccccc;
+  --color-text-secondary: #969696;
+  --color-text-muted: #6b6b6b;
+  --color-text-on-accent: #ffffff;
+
+  /* ---------------------------------------------------------------------------
+     Border
+     --------------------------------------------------------------------------- */
+  --color-border-primary: #3e3e42;
+  --color-border-secondary: #555555;
+  --color-border-focus: #4ba0f5;
+
+  /* ---------------------------------------------------------------------------
+     Accent
+     --------------------------------------------------------------------------- */
+  --color-accent: #4ba0f5;
+  --color-accent-hover: #6bb5ff;
+  --color-accent-light: rgba(75, 160, 245, 0.15);
+
+  /* ---------------------------------------------------------------------------
+     Grid
+     --------------------------------------------------------------------------- */
+  --color-grid-line: #3e3e42;
+  --color-grid-header-bg: #252526;
+  --color-grid-header-border: #555555;
+  --color-grid-cell-bg: #1e1e1e;
+  --color-grid-cell-selected: rgba(75, 160, 245, 0.1);
+  --color-grid-selection-border: #4ba0f5;
+
+  /* ---------------------------------------------------------------------------
+     Header States
+     --------------------------------------------------------------------------- */
+  --color-header-hover: #3e3e42;
+  --color-header-selected-bg: rgba(75, 160, 245, 0.2);
+  --color-header-selected-text: #6bb5ff;
+  --color-header-selected-border: rgba(75, 160, 245, 0.3);
+  --color-header-gradient-light: rgba(255, 255, 255, 0.04);
+  --color-header-gradient-dark: rgba(0, 0, 0, 0.1);
+
+  /* ---------------------------------------------------------------------------
+     Button States
+     --------------------------------------------------------------------------- */
+  --color-btn-active-bg: #4e4e52;
+  --color-btn-pressed-bg: rgba(75, 160, 245, 0.15);
+  --color-btn-pressed-border: rgba(75, 160, 245, 0.3);
+  --color-btn-pressed-hover-bg: rgba(75, 160, 245, 0.2);
+  --color-btn-pressed-hover-border: rgba(75, 160, 245, 0.4);
+  --color-btn-pressed-active-bg: rgba(75, 160, 245, 0.25);
+  --color-btn-pressed-active-border: rgba(75, 160, 245, 0.5);
+
+  /* ---------------------------------------------------------------------------
+     Selection Overlay
+     --------------------------------------------------------------------------- */
+  --color-selection-fill: rgba(75, 160, 245, 0.15);
+  --color-selection-border: rgba(75, 160, 245, 0.6);
+  --color-selection-secondary-fill: rgba(75, 160, 245, 0.08);
+  --color-selection-secondary-border: rgba(75, 160, 245, 0.35);
+
+  /* ---------------------------------------------------------------------------
+     Fill Handle
+     --------------------------------------------------------------------------- */
+  --color-fill-handle: #4ba0f5;
+  --color-fill-handle-hover: #6bb5ff;
+  --color-fill-handle-active: #3d8de5;
+  --color-fill-handle-border: #1e1e1e;
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Lines
+     --------------------------------------------------------------------------- */
+  --color-freeze-line: #6b6b6b;
+
+  /* ---------------------------------------------------------------------------
+     Semantic Status Colors
+     --------------------------------------------------------------------------- */
+  --color-danger: #f48771;
+  --color-danger-light: #3a1d1d;
+  --color-danger-border: #6e3030;
+  --color-danger-border-hover: #f48771;
+  --color-warning: #e9a644;
+  --color-warning-text: #e9a644;
+  --color-warning-bg: #3a2e1d;
+  --color-success-bg: #2d7d46;
+  --color-success-bg-hover: #39955a;
+  --color-success-bg-active: #267040;
+
+  /* ---------------------------------------------------------------------------
+     Dialog / Overlay
+     --------------------------------------------------------------------------- */
+  --color-backdrop: rgba(0, 0, 0, 0.5);
+
+  /* ---------------------------------------------------------------------------
+     Focus
+     --------------------------------------------------------------------------- */
+  --color-focus-ring: rgba(75, 160, 245, 0.5);
+  --color-focus-ring-strong: rgba(75, 160, 245, 0.7);
+
+  /* ---------------------------------------------------------------------------
+     Cell
+     --------------------------------------------------------------------------- */
+  --color-cell-hover: rgba(255, 255, 255, 0.03);
+  --color-marching-ants: #4ba0f5;
+
+  /* ---------------------------------------------------------------------------
+     Swatch / Color Picker
+     --------------------------------------------------------------------------- */
+  --color-swatch-border: rgba(255, 255, 255, 0.15);
+
+  /* ---------------------------------------------------------------------------
+     Active Cell
+     --------------------------------------------------------------------------- */
+  --color-active-cell-inset: rgba(0, 0, 0, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Warning Focus
+     --------------------------------------------------------------------------- */
+  --color-warning-focus-ring: rgba(233, 166, 68, 0.25);
+
+  /* ---------------------------------------------------------------------------
+     Editor Mode
+     --------------------------------------------------------------------------- */
+  --color-mode-edit: #4ba0f5;
+  --color-mode-point: #81c784;
+  --color-mode-enter: #ffd54f;
+  --color-editor-selection: rgba(75, 160, 245, 0.3);
+  --color-editor-point-selection: rgba(129, 199, 132, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Format Painter
+     --------------------------------------------------------------------------- */
+  --color-format-painter: #4ade80;
+  --color-format-painter-fill: rgba(74, 222, 128, 0.08);
+  --color-format-painter-hover: rgba(74, 222, 128, 0.12);
+  --color-format-painter-border: rgba(74, 222, 128, 0.35);
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Shadows
+     --------------------------------------------------------------------------- */
+  --shadow-freeze-v: 2px 0 4px rgba(0, 0, 0, 0.3);
+  --shadow-freeze-h: 0 2px 4px rgba(0, 0, 0, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Shadows (darker for dark surfaces)
+     --------------------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+  --shadow-dropdown: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 20px 60px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+  --shadow-context: 0 2px 6px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-fill-handle: 0 1px 3px rgba(0, 0, 0, 0.5);
+}

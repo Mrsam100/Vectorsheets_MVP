@@ -28,10 +28,14 @@ export { FillHandleOverlay } from './FillHandleOverlay';
 export type { FillHandleOverlayProps } from './FillHandleOverlay';
 export { FormatPainterOverlay } from './FormatPainterOverlay';
 export type { FormatPainterOverlayProps } from './FormatPainterOverlay';
+export { ContextMenu } from './ContextMenu';
+export type { ContextMenuProps } from './ContextMenu';
+export { FilterDropdown } from './FilterDropdown';
+export type { FilterDropdownProps } from './FilterDropdown';
 
 // Interaction handling
 export { PointerAdapter, usePointerAdapter } from './PointerAdapter';
-export type { SpreadsheetIntent as PointerIntent } from './PointerAdapter';
+export type { PointerIntent } from './PointerAdapter';
 export { IntentHandler, useIntentHandler } from './IntentHandler';
 export type { IntentResult, DragState, SpreadsheetIntent } from './IntentHandler';
 export { useKeyboardAdapter } from './KeyboardAdapter';
@@ -45,7 +49,7 @@ export {
 } from './AutoScrollController';
 export type {
   ScrollDirection,
-  ScrollState,
+  ScrollState as AutoScrollState,
   ViewportBounds,
   ScrollLimits,
   AutoScrollConfig,
@@ -58,8 +62,6 @@ export {
   EditModeManager,
   CellEditorOverlay,
   FormulaBar,
-  formatCellAddress,
-  columnToLetter,
   useEditModeIntegration,
 } from './editing';
 export type {

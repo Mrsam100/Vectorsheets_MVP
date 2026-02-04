@@ -43,7 +43,6 @@ import React, {
   useCallback,
   useState,
   memo,
-  useLayoutEffect,
 } from 'react';
 import type { EditModeState, EditModeActions } from './useEditMode';
 import { useFormulaAutoComplete } from './useFormulaAutoComplete';
@@ -106,6 +105,8 @@ export interface CellEditorOverlayProps {
   onScrollIntoView?: (bounds: { x: number; y: number; width: number; height: number }) => void;
   /** Whether editing a merged cell (affects sizing) */
   isMergedCell?: boolean;
+  /** Height of virtual keyboard in CSS px (0 when closed) */
+  keyboardHeight?: number;
 }
 
 /**
@@ -121,55 +122,7 @@ interface EditHistoryEntry {
 // Styles (injected once)
 // =============================================================================
 
-const STYLE_ID = 'cell-editor-overlay-styles';
-
-function ensureStyles(): void {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById(STYLE_ID)) return;
-
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .cell-editor-input {
-      caret-color: #1a73e8;
-    }
-
-    .cell-editor-input:focus {
-      outline: none;
-    }
-
-    .cell-editor-input::selection {
-      background-color: rgba(26, 115, 232, 0.3);
-    }
-
-    .cell-editor-overlay[data-mode="point"] .cell-editor-input {
-      caret-color: #34a853;
-    }
-
-    .cell-editor-overlay[data-mode="point"] .cell-editor-input::selection {
-      background-color: rgba(52, 168, 83, 0.3);
-    }
-
-    @keyframes cellEditorFocusPulse {
-      0%, 100% { box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15); }
-      50% { box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15); }
-    }
-
-    .cell-editor-input:focus {
-      animation: cellEditorFocusPulse 2s ease-in-out infinite;
-    }
-
-    .cell-editor-mode-indicator {
-      animation: fadeIn 0.15s ease-out;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(2px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  `;
-  document.head.appendChild(style);
-}
+// Editor styles (caret, selection, focus pulse) moved to index.css — themed via CSS custom properties
 
 // =============================================================================
 // Hooks
@@ -312,11 +265,9 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   zoom = 1.0,
   onScrollIntoView,
   isMergedCell = false,
+  keyboardHeight = 0,
 }) => {
-  // Ensure styles are injected
-  useLayoutEffect(() => {
-    ensureStyles();
-  }, []);
+  // Editor styles now in index.css (themed)
 
   const inputRef = useRef<HTMLInputElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -433,13 +384,13 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         if (!containerRef.current) return;
 
         const rect = containerRef.current.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
+        const effectiveViewportHeight = window.innerHeight - keyboardHeight;
         const viewportWidth = window.innerWidth;
 
         const isOffScreen =
           rect.top < 0 ||
           rect.left < 0 ||
-          rect.bottom > viewportHeight ||
+          rect.bottom > effectiveViewportHeight ||
           rect.right > viewportWidth;
 
         if (isOffScreen) {
@@ -459,7 +410,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         scrollRafRef.current = null;
       }
     };
-  }, [state.isEditing, cellPosition, inputWidth, onScrollIntoView]);
+  }, [state.isEditing, cellPosition, inputWidth, onScrollIntoView, keyboardHeight]);
 
   // Measure text and adjust width (preserving selection)
   useEffect(() => {
@@ -791,8 +742,11 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     safeTimeout(() => {
       // Re-check composition (may have started between blur and timeout)
       if (isComposingRef.current) return;
+      // Guard against double-commit (Enter/Tab/Escape may have already committed)
+      if (hasCommittedRef.current) return;
       if (!document.activeElement?.closest('[data-edit-component]') &&
           !document.activeElement?.closest('[data-cell-editor]')) {
+        hasCommittedRef.current = true;
         actions.confirmEdit();
         onClose?.();
       }
@@ -810,7 +764,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   const scaledBorderWidth = Math.max(1, Math.round(2 * zoom));
 
   // Border color based on mode
-  const borderColor = state.mode === 'point' ? '#34a853' : '#1a73e8';
+  const borderColor = state.mode === 'point' ? 'var(--color-mode-point)' : 'var(--color-mode-edit)';
 
   // Editor styles
   const editorStyle: React.CSSProperties = {
@@ -861,6 +815,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
           onBlur={handleBlur}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
+          maxLength={32767}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
@@ -878,8 +833,8 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
             fontFamily: 'Arial, sans-serif',
             fontSize: `${scaledFontSize}px`,
             lineHeight: `${Math.max(16 * zoom, cellPosition.height - scaledBorderWidth * 2)}px`,
-            backgroundColor: 'white',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            backgroundColor: 'var(--color-bg-primary)',
+            boxShadow: 'var(--shadow-md)',
             boxSizing: 'border-box',
           }}
         />
@@ -895,10 +850,10 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
               fontSize: `${Math.round(10 * zoom)}px`,
               fontFamily: 'system-ui, -apple-system, sans-serif',
               color: borderColor,
-              backgroundColor: 'white',
+              backgroundColor: 'var(--color-bg-primary)',
               padding: `${Math.round(1 * zoom)}px ${Math.round(4 * zoom)}px`,
               borderRadius: `${Math.round(2 * zoom)}px`,
-              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+              boxShadow: 'var(--shadow-sm)',
               textTransform: 'uppercase',
               fontWeight: 500,
               letterSpacing: '0.5px',
@@ -917,11 +872,11 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
               right: 0,
               fontSize: `${Math.round(9 * zoom)}px`,
               fontFamily: 'system-ui, -apple-system, sans-serif',
-              color: '#888',
-              backgroundColor: 'white',
+              color: 'var(--color-text-muted)',
+              backgroundColor: 'var(--color-bg-primary)',
               padding: `${Math.round(1 * zoom)}px ${Math.round(3 * zoom)}px`,
               borderRadius: `${Math.round(2 * zoom)}px`,
-              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+              boxShadow: 'var(--shadow-sm)',
             }}
           >
             {canUndo && <span title="Undo: Ctrl+Z">↶</span>}

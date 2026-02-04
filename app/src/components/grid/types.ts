@@ -382,6 +382,20 @@ export interface FormatPainterUIState {
 }
 
 // =============================================================================
+// Context Menu
+// =============================================================================
+
+/** Which area of the grid was right-clicked. */
+export type ContextMenuTargetArea = 'cell' | 'rowHeader' | 'colHeader';
+
+/** Describes the right-click target for context menu routing. */
+export interface ContextMenuTarget {
+  area: ContextMenuTargetArea;
+  row: number;
+  col: number;
+}
+
+// =============================================================================
 // Viewport/Scroll State
 // =============================================================================
 
@@ -440,6 +454,9 @@ export function getColumnLabel(index: number): string {
   }
   return label;
 }
+
+/** Alias for getColumnLabel — converts 0-based column index to letter (A, B, ..., Z, AA, ...) */
+export const columnToLetter = getColumnLabel;
 
 /**
  * Convert column letter to index (A=0, B=1, ..., AA=26, ...)

@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VectorSheet</title>
+    <!-- Flash-free theme: set data attributes before first paint -->
+    <script>
+      (function() {
+        var t = localStorage.getItem('vs-theme');
+        var d = localStorage.getItem('vs-density');
+        var valid = ['light','dark','high-contrast','system'];
+        if (valid.indexOf(t) === -1) t = null;
+        if (t === 'system') {
+          if (window.matchMedia('(prefers-contrast: more)').matches) {
+            t = 'high-contrast';
+          } else {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+        } else if (!t) {
+          t = 'light';
+        }
+        document.documentElement.dataset.vsTheme = t;
+        if (d && d !== 'default') document.documentElement.dataset.vsDensity = d;
+        document.documentElement.dataset.vsAnimating = 'true';
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

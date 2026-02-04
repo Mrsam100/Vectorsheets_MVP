@@ -16,6 +16,7 @@ import { RibbonButton, RibbonToggleButton } from './RibbonButton';
 import { RibbonDropdown, type RibbonDropdownOption } from './RibbonDropdown';
 import { RibbonColorPicker } from './RibbonColorPicker';
 import { RibbonGroup, RibbonSeparator } from './RibbonGroup';
+import { RibbonOverflowMenu } from './RibbonOverflowMenu';
 import {
   CutIcon, CopyIcon, PasteIcon, FormatPainterIcon,
   UndoIcon, RedoIcon,
@@ -202,8 +203,8 @@ export const Ribbon: React.FC<RibbonProps> = memo(
         role="toolbar"
         aria-label="Formatting toolbar"
       >
-        {/* Clipboard Group */}
-        <RibbonGroup label="Clipboard">
+        {/* Clipboard Group — priority 1 (always visible) */}
+        <RibbonGroup label="Clipboard" priority={1}>
           <RibbonButton icon={ICON_CUT} tooltip="Cut (Ctrl+X)" onClick={handleCut} disabled={editDisabled || !state.hasSelection} />
           <RibbonButton icon={ICON_COPY} tooltip="Copy (Ctrl+C)" onClick={handleCopy} disabled={!state.hasSelection} />
           <RibbonButton icon={ICON_PASTE} tooltip="Paste (Ctrl+V)" onClick={handlePaste} disabled={editDisabled} />
@@ -216,58 +217,63 @@ export const Ribbon: React.FC<RibbonProps> = memo(
           />
         </RibbonGroup>
 
-        <RibbonSeparator />
+        <RibbonSeparator beforePriority={2} />
 
-        {/* History Group */}
-        <RibbonGroup label="History">
+        {/* History Group — priority 2 (always visible) */}
+        <RibbonGroup label="History" priority={2}>
           <RibbonButton icon={ICON_UNDO} tooltip="Undo (Ctrl+Z)" onClick={handleUndo} disabled={!state.canUndo} />
           <RibbonButton icon={ICON_REDO} tooltip="Redo (Ctrl+Y)" onClick={handleRedo} disabled={!state.canRedo} />
         </RibbonGroup>
 
-        <RibbonSeparator />
+        <RibbonSeparator beforePriority={3} />
 
-        {/* Font Group */}
-        <RibbonGroup label="Font">
-          <RibbonDropdown
-            value={fmt.fontFamily ?? 'Arial'}
-            options={FONT_FAMILIES}
-            onChange={handleFontFamily}
-            tooltip="Font Family"
-            ariaLabel="Font family"
-            width={120}
-            disabled={editDisabled}
-          />
-          <RibbonDropdown
-            value={fmt.fontSize ?? 11}
-            options={FONT_SIZES}
-            onChange={handleFontSize}
-            tooltip="Font Size"
-            ariaLabel="Font size"
-            width={52}
-            disabled={editDisabled}
-          />
+        {/* Font Group — priority 3 (B/I/U/S always visible; dropdowns+colors overflow at medium) */}
+        <RibbonGroup label="Font" priority={3}>
+          {/* Font extras: dropdowns + colors hidden at medium breakpoint via CSS */}
+          <span className="ribbon-font-extras">
+            <RibbonDropdown
+              value={fmt.fontFamily ?? 'Arial'}
+              options={FONT_FAMILIES}
+              onChange={handleFontFamily}
+              tooltip="Font Family"
+              ariaLabel="Font family"
+              width={120}
+              disabled={editDisabled}
+            />
+            <RibbonDropdown
+              value={fmt.fontSize ?? 11}
+              options={FONT_SIZES}
+              onChange={handleFontSize}
+              tooltip="Font Size"
+              ariaLabel="Font size"
+              width={52}
+              disabled={editDisabled}
+            />
+          </span>
           <RibbonToggleButton icon={ICON_BOLD} tooltip="Bold (Ctrl+B)" pressed={!!fmt.bold} onClick={handleBold} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_ITALIC} tooltip="Italic (Ctrl+I)" pressed={!!fmt.italic} onClick={handleItalic} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_UNDERLINE} tooltip="Underline (Ctrl+U)" pressed={!!fmt.underline} onClick={handleUnderline} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_STRIKETHROUGH} tooltip="Strikethrough" pressed={!!fmt.strikethrough} onClick={handleStrikethrough} disabled={editDisabled} />
-          <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} />
-          <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} />
+          <span className="ribbon-font-extras">
+            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} />
+            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} />
+          </span>
         </RibbonGroup>
 
-        <RibbonSeparator />
+        <RibbonSeparator beforePriority={4} />
 
-        {/* Alignment Group */}
-        <RibbonGroup label="Alignment">
+        {/* Alignment Group — priority 4 (overflows at medium) */}
+        <RibbonGroup label="Alignment" priority={4}>
           <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} />
           <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} />
         </RibbonGroup>
 
-        <RibbonSeparator />
+        <RibbonSeparator beforePriority={5} />
 
-        {/* Number Group */}
-        <RibbonGroup label="Number">
+        {/* Number Group — priority 5 (overflows first) */}
+        <RibbonGroup label="Number" priority={5}>
           <RibbonDropdown
             value={fmt.numberFormat ?? 'General'}
             options={NUMBER_FORMATS}
@@ -278,6 +284,54 @@ export const Ribbon: React.FC<RibbonProps> = memo(
             disabled={editDisabled}
           />
         </RibbonGroup>
+
+        {/* Overflow menu — shown via container query when groups are hidden */}
+        <RibbonOverflowMenu>
+          {/* Font extras (dropdowns + colors) */}
+          <RibbonGroup label="Font">
+            <RibbonDropdown
+              value={fmt.fontFamily ?? 'Arial'}
+              options={FONT_FAMILIES}
+              onChange={handleFontFamily}
+              tooltip="Font Family"
+              ariaLabel="Font family"
+              width={120}
+              disabled={editDisabled}
+            />
+            <RibbonDropdown
+              value={fmt.fontSize ?? 11}
+              options={FONT_SIZES}
+              onChange={handleFontSize}
+              tooltip="Font Size"
+              ariaLabel="Font size"
+              width={52}
+              disabled={editDisabled}
+            />
+            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} />
+            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} />
+          </RibbonGroup>
+          <RibbonSeparator />
+          {/* Alignment */}
+          <RibbonGroup label="Alignment">
+            <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} />
+            <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} />
+            <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} />
+            <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} />
+          </RibbonGroup>
+          <RibbonSeparator />
+          {/* Number */}
+          <RibbonGroup label="Number">
+            <RibbonDropdown
+              value={fmt.numberFormat ?? 'General'}
+              options={NUMBER_FORMATS}
+              onChange={handleNumberFormat}
+              tooltip="Number Format"
+              ariaLabel="Number format"
+              width={100}
+              disabled={editDisabled}
+            />
+          </RibbonGroup>
+        </RibbonOverflowMenu>
       </div>
     );
   },

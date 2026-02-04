@@ -15,7 +15,10 @@ export { RibbonColorPicker } from './RibbonColorPicker';
 export type { RibbonColorPickerProps } from './RibbonColorPicker';
 
 export { RibbonGroup, RibbonSeparator } from './RibbonGroup';
-export type { RibbonGroupProps } from './RibbonGroup';
+export type { RibbonGroupProps, RibbonSeparatorProps } from './RibbonGroup';
+
+export { RibbonOverflowMenu } from './RibbonOverflowMenu';
+export type { RibbonOverflowMenuProps } from './RibbonOverflowMenu';
 
 export type { RibbonState } from './types';
 export { DEFAULT_RIBBON_STATE } from './types';

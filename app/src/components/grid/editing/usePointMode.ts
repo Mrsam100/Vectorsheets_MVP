@@ -46,6 +46,7 @@
 
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { getReferenceColor } from './FormulaReferenceHighlight';
+import { columnToLetter } from '../types';
 
 // =============================================================================
 // Types
@@ -95,20 +96,6 @@ export interface UsePointModeReturn {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-/**
- * Convert column index to letter (0 = A, 1 = B, ..., 25 = Z, 26 = AA)
- */
-function columnToLetter(col: number): string {
-  let result = '';
-  let n = col + 1;
-  while (n > 0) {
-    n--;
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26);
-  }
-  return result;
-}
 
 /**
  * Format cell as A1-style reference
@@ -335,13 +322,13 @@ export function usePointMode(): UsePointModeReturn {
         newRow = Math.max(0, currentCell.row - 1);
         break;
       case 'down':
-        newRow = currentCell.row + 1;
+        newRow = Math.min(1048575, currentCell.row + 1);
         break;
       case 'left':
         newCol = Math.max(0, currentCell.col - 1);
         break;
       case 'right':
-        newCol = currentCell.col + 1;
+        newCol = Math.min(16383, currentCell.col + 1);
         break;
     }
 
@@ -416,5 +403,4 @@ export function usePointMode(): UsePointModeReturn {
 // Exports
 // =============================================================================
 
-export { columnToLetter };
 export default usePointMode;

@@ -41,11 +41,7 @@ const RowHeader: React.FC<{
 
   return (
     <div
-      className={`row-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b ${
-        isSelected
-          ? 'bg-blue-100 text-blue-700 border-blue-200'
-          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-      }`}
+      className="row-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b"
       style={{
         top: adjustedTop,
         height: row.height,
@@ -67,7 +63,7 @@ const RowHeader: React.FC<{
 
       {/* Resize handle - bottom edge */}
       <div
-        className="resize-handle absolute left-0 right-0 bottom-0 h-1 cursor-row-resize hover:bg-blue-500 transition-colors"
+        className="resize-handle absolute left-0 right-0 bottom-0 h-1 cursor-row-resize transition-colors"
         onMouseDown={(e) => {
           e.stopPropagation();
           e.preventDefault();
@@ -107,7 +103,7 @@ export const RowHeaders: React.FC<RowHeadersProps> = memo(
 
     return (
       <div
-        className={`row-headers absolute overflow-hidden bg-gray-50 ${className}`}
+        className={`row-headers absolute overflow-hidden ${className}`}
         style={{
           left: 0,
           top: config.colHeaderHeight,
@@ -143,8 +139,8 @@ export const RowHeaders: React.FC<RowHeadersProps> = memo(
 
         {/* Right border line for visual separation */}
         <div
-          className="absolute top-0 bottom-0 right-0 w-px bg-gray-300"
-          style={{ zIndex: 25 }}
+          className="absolute top-0 bottom-0 right-0 w-px"
+          style={{ zIndex: 25, backgroundColor: 'var(--color-grid-header-border)' }}
         />
       </div>
     );

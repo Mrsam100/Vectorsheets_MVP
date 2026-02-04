@@ -94,6 +94,8 @@ export interface NavigatePageIntent extends BaseKeyboardIntent {
   type: 'NavigatePage';
   direction: 'up' | 'down';
   extend: boolean;
+  /** Number of rows to jump. Defaults to 20 if not provided. */
+  pageSize?: number;
 }
 
 /**
@@ -185,6 +187,14 @@ export interface UndoRedoIntent extends BaseKeyboardIntent {
 }
 
 /**
+ * Open Find/Replace dialog
+ */
+export interface OpenFindReplaceIntent extends BaseKeyboardIntent {
+  type: 'OpenFindReplace';
+  mode: 'find' | 'replace';
+}
+
+/**
  * Union of all keyboard intents
  */
 export type KeyboardIntent =
@@ -200,7 +210,8 @@ export type KeyboardIntent =
   | DeleteContentsIntent
   | ClipboardActionIntent
   | ApplyFormatIntent
-  | UndoRedoIntent;
+  | UndoRedoIntent
+  | OpenFindReplaceIntent;
 
 // =============================================================================
 // Intent Creation Helpers
@@ -364,6 +375,8 @@ export interface UseKeyboardAdapterOptions {
   isEditing?: boolean;
   /** Whether keyboard handling is enabled */
   enabled?: boolean;
+  /** Number of visible rows in viewport (used for PageUp/Down). */
+  visibleRows?: number;
 }
 
 /**
@@ -384,12 +397,14 @@ export interface UseKeyboardAdapterOptions {
  * ```
  */
 export function useKeyboardAdapter(options: UseKeyboardAdapterOptions) {
-  const { onIntent, containerRef, isEditing = false, enabled = true } = options;
+  const { onIntent, containerRef, isEditing = false, enabled = true, visibleRows } = options;
   const handlerRef = useRef<KeyboardHandler | null>(null);
   const onIntentRef = useRef(onIntent);
+  const visibleRowsRef = useRef(visibleRows);
 
-  // Keep onIntent ref up to date
+  // Keep refs up to date
   onIntentRef.current = onIntent;
+  visibleRowsRef.current = visibleRows;
 
   // Initialize KeyboardHandler
   useEffect(() => {
@@ -401,6 +416,10 @@ export function useKeyboardAdapter(options: UseKeyboardAdapterOptions) {
     handler.subscribe((engineIntent) => {
       const uiIntent = convertEngineIntent(engineIntent);
       if (uiIntent) {
+        // Inject dynamic page size for NavigatePage intents
+        if (uiIntent.type === 'NavigatePage' && visibleRowsRef.current) {
+          (uiIntent as NavigatePageIntent).pageSize = visibleRowsRef.current;
+        }
         onIntentRef.current(uiIntent);
       }
     });
@@ -425,6 +444,9 @@ export function useKeyboardAdapter(options: UseKeyboardAdapterOptions) {
     if (!container || !handler || !enabled) return;
 
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      // Skip IME composition events (CJK input methods generate intermediate keydowns)
+      if (e.isComposing || e.keyCode === 229) return;
+
       // Don't handle if target is an input/textarea (unless it's our cell editor)
       const target = e.target as HTMLElement;
       if (
@@ -434,6 +456,27 @@ export function useKeyboardAdapter(options: UseKeyboardAdapterOptions) {
       ) {
         // Allow if it's marked as our cell editor
         if (!target.dataset.cellEditor) {
+          return;
+        }
+      }
+
+      // Intercept Ctrl+F / Ctrl+H before engine — these are UI-only shortcuts
+      // that must preventDefault to block the browser's native Find dialog.
+      // If user is editing a cell, confirm the edit first (matches Excel behaviour).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        if (e.key === 'f' || e.key === 'h') {
+          e.preventDefault();
+          e.stopPropagation();
+          // Commit any active cell edit before opening Find
+          if (handlerRef.current?.getMode() === 'editing') {
+            onIntentRef.current(createIntent<ConfirmEditIntent>({
+              type: 'ConfirmEdit',
+            }));
+          }
+          onIntentRef.current(createIntent<OpenFindReplaceIntent>({
+            type: 'OpenFindReplace',
+            mode: e.key === 'h' ? 'replace' : 'find',
+          }));
           return;
         }
       }

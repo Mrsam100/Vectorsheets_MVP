@@ -33,12 +33,13 @@
  * ┌────────────────────────┬─────────────────────────────────────────────┐
  * │ User Action            │ Emitted Intent                              │
  * ├────────────────────────┼─────────────────────────────────────────────┤
- * │ Click on cell          │ SetActiveCell { row, col }                  │
+ * │ Click on cell (down)   │ SetActiveCell { row, col }                  │
+ * │ Click on cell (up)     │ BeginEdit { row, col }  (single-click edit) │
  * │ Shift+Click            │ ExtendSelection { row, col }                │
  * │ Ctrl/Cmd+Click         │ AddRange { row, col }                       │
- * │ Click+Drag             │ BeginDragSelection → UpdateDragSelection    │
+ * │ Click+Drag (>3px)      │ BeginDragSelection → UpdateDragSelection    │
  * │ Release drag           │ EndDragSelection                            │
- * │ Double-click           │ BeginEdit { row, col }                      │
+ * │ Double-click           │ BeginEdit { row, col }  (redundant/harmless)│
  * │ Click row header       │ SelectRow { row }                           │
  * │ Click col header       │ SelectColumn { col }                        │
  * │ Click corner           │ SelectAll                                   │
@@ -123,7 +124,7 @@ export interface EndDragSelectionIntent extends BaseIntent {
 
 /**
  * Begin editing a cell
- * Triggered by double-click or F2
+ * Triggered by single-click (pointerup without drag), double-click, or F2
  */
 export interface BeginEditIntent extends BaseIntent {
   type: 'BeginEdit';
@@ -201,10 +202,83 @@ export interface EndFillDragIntent extends BaseIntent {
   col: number;
 }
 
+// =============================================================================
+// Context Menu Action Intent Types
+// =============================================================================
+
+/** Insert rows at a given position */
+export interface InsertRowsIntent extends BaseIntent {
+  type: 'InsertRows';
+  row: number;
+  count: number;
+}
+
+/** Delete rows in a range (inclusive) */
+export interface DeleteRowsIntent extends BaseIntent {
+  type: 'DeleteRows';
+  startRow: number;
+  endRow: number;
+}
+
+/** Insert columns at a given position */
+export interface InsertColumnsIntent extends BaseIntent {
+  type: 'InsertColumns';
+  col: number;
+  count: number;
+}
+
+/** Delete columns in a range (inclusive) */
+export interface DeleteColumnsIntent extends BaseIntent {
+  type: 'DeleteColumns';
+  startCol: number;
+  endCol: number;
+}
+
+/** Merge cells in the current selection */
+export interface MergeCellsIntent extends BaseIntent {
+  type: 'MergeCells';
+}
+
+/** Unmerge cells in the current selection */
+export interface UnmergeCellsIntent extends BaseIntent {
+  type: 'UnmergeCells';
+}
+
+/** Open the format cells dialog */
+export interface ShowFormatDialogIntent extends BaseIntent {
+  type: 'ShowFormatDialog';
+}
+
+/** Open the sort dialog */
+export interface OpenSortDialogIntent extends BaseIntent {
+  type: 'OpenSortDialog';
+}
+
+/** Open the filter dropdown for a column */
+export interface OpenFilterDropdownIntent extends BaseIntent {
+  type: 'OpenFilterDropdown';
+  column: number;
+  anchorRect: { x: number; y: number; width: number; height: number };
+}
+
+/** Open the data validation dialog */
+export interface OpenDataValidationIntent extends BaseIntent {
+  type: 'OpenDataValidation';
+}
+
+/** Show context menu at a position (triggered by touch long-press) */
+export interface ShowContextMenuIntent extends BaseIntent {
+  type: 'ShowContextMenu';
+  row: number;
+  col: number;
+  screenX: number;
+  screenY: number;
+}
+
 /**
- * Union of all intent types
+ * Union of all pointer/context-menu intent types
  */
-export type SpreadsheetIntent =
+export type PointerIntent =
   | SetActiveCellIntent
   | ExtendSelectionIntent
   | AddRangeIntent
@@ -219,13 +293,24 @@ export type SpreadsheetIntent =
   | StopAutoScrollIntent
   | BeginFillDragIntent
   | UpdateFillDragIntent
-  | EndFillDragIntent;
+  | EndFillDragIntent
+  | InsertRowsIntent
+  | DeleteRowsIntent
+  | InsertColumnsIntent
+  | DeleteColumnsIntent
+  | MergeCellsIntent
+  | UnmergeCellsIntent
+  | ShowFormatDialogIntent
+  | OpenSortDialogIntent
+  | OpenFilterDropdownIntent
+  | OpenDataValidationIntent
+  | ShowContextMenuIntent;
 
 // =============================================================================
 // Intent Factory (Creates intents with timestamp)
 // =============================================================================
 
-function createIntent<T extends SpreadsheetIntent>(
+function createIntent<T extends PointerIntent>(
   intent: Omit<T, 'timestamp'>
 ): T {
   return {
@@ -238,9 +323,16 @@ function createIntent<T extends SpreadsheetIntent>(
 // Pointer State (Internal tracking)
 // =============================================================================
 
+/** Minimum pixel distance before a pointerdown+move is treated as a drag */
+const DRAG_THRESHOLD = 3;
+
 interface PointerState {
-  /** Is a drag operation in progress? */
+  /** Is a drag operation in progress (threshold exceeded)? */
   isDragging: boolean;
+  /** Is the pointer currently down (before or after threshold)? */
+  isPointerDown: boolean;
+  /** Starting pixel position of pointerdown (for drag threshold calc) */
+  dragStartPoint: { x: number; y: number } | null;
   /** Starting cell of drag */
   dragStartCell: { row: number; col: number } | null;
   /** Last cell emitted during drag (for same-cell dedup) */
@@ -255,6 +347,10 @@ interface PointerState {
   autoScrollInterval: number | null;
   /** Current auto-scroll direction */
   autoScrollDirection: 'up' | 'down' | 'left' | 'right' | null;
+  /** Timer for touch long-press detection */
+  longPressTimer: ReturnType<typeof setTimeout> | null;
+  /** Origin point of a potential long-press (for movement threshold) */
+  longPressOrigin: { x: number; y: number } | null;
 }
 
 // =============================================================================
@@ -263,7 +359,7 @@ interface PointerState {
 
 export interface PointerAdapterConfig {
   /** Callback when intent is emitted */
-  onIntent: (intent: SpreadsheetIntent) => void;
+  onIntent: (intent: PointerIntent) => void;
   /** Get cell at screen coordinates */
   getCellAtPoint: (x: number, y: number) => { row: number; col: number } | null;
   /** Get viewport bounds for auto-scroll detection */
@@ -277,7 +373,10 @@ export interface PointerAdapterConfig {
 }
 
 /**
- * PointerAdapter - Handles all mouse interactions
+ * PointerAdapter - Handles all pointer interactions (mouse, touch, pen)
+ *
+ * Uses the Pointer Events API for unified mouse/touch/pen support.
+ * This enables tablet and touchscreen users to interact with the grid.
  *
  * Usage:
  * ```typescript
@@ -288,9 +387,7 @@ export interface PointerAdapterConfig {
  * });
  *
  * // Attach to element
- * element.addEventListener('mousedown', adapter.handleMouseDown);
- * element.addEventListener('mousemove', adapter.handleMouseMove);
- * element.addEventListener('mouseup', adapter.handleMouseUp);
+ * element.addEventListener('pointerdown', adapter.handlePointerDown);
  * element.addEventListener('dblclick', adapter.handleDoubleClick);
  * ```
  */
@@ -308,6 +405,7 @@ export class PointerAdapter {
 
     this.state = {
       isDragging: false,
+      isPointerDown: false,
       dragStartCell: null,
       lastDragCell: null,
       isFillDrag: false,
@@ -315,17 +413,20 @@ export class PointerAdapter {
       isExtending: false,
       autoScrollInterval: null,
       autoScrollDirection: null,
+      longPressTimer: null,
+      longPressOrigin: null,
+      dragStartPoint: null,
     };
 
     // Bind methods to preserve `this` context
-    this.handleMouseDown = this.handleMouseDown.bind(this);
-    this.handleMouseMove = this.handleMouseMove.bind(this);
-    this.handleMouseUp = this.handleMouseUp.bind(this);
+    this.handlePointerDown = this.handlePointerDown.bind(this);
+    this.handlePointerMove = this.handlePointerMove.bind(this);
+    this.handlePointerUp = this.handlePointerUp.bind(this);
     this.handleDoubleClick = this.handleDoubleClick.bind(this);
     this.handleRowHeaderClick = this.handleRowHeaderClick.bind(this);
     this.handleColHeaderClick = this.handleColHeaderClick.bind(this);
     this.handleCornerClick = this.handleCornerClick.bind(this);
-    this.handleFillHandleMouseDown = this.handleFillHandleMouseDown.bind(this);
+    this.handleFillHandlePointerDown = this.handleFillHandlePointerDown.bind(this);
   }
 
   // ===========================================================================
@@ -333,13 +434,16 @@ export class PointerAdapter {
   // ===========================================================================
 
   /**
-   * Handle mousedown on cell area
+   * Handle pointerdown on cell area (supports mouse, touch, pen)
    */
-  handleMouseDown(e: MouseEvent): void {
-    if (e.button !== 0) return; // Only left click
+  handlePointerDown(e: PointerEvent): boolean {
+    if (e.button !== 0) return false; // Only primary button
 
     const cell = this.config.getCellAtPoint(e.clientX, e.clientY);
-    if (!cell) return;
+    if (!cell) return false;
+
+    // Capture pointer for reliable move/up delivery (critical for touch)
+    (e.target as HTMLElement)?.setPointerCapture?.(e.pointerId);
 
     // Track modifier keys
     this.state.isAdditive = e.ctrlKey || e.metaKey;
@@ -360,7 +464,7 @@ export class PointerAdapter {
         col: cell.col,
       }));
     } else {
-      // Normal click: Set active cell
+      // Normal click: Set active cell immediately for visual feedback
       this.emit(createIntent<SetActiveCellIntent>({
         type: 'SetActiveCell',
         row: cell.row,
@@ -368,30 +472,85 @@ export class PointerAdapter {
       }));
     }
 
-    // Start drag tracking
-    this.state.isDragging = true;
+    // Start pointer tracking (drag begins only after DRAG_THRESHOLD exceeded)
+    this.state.isPointerDown = true;
+    this.state.isDragging = false;
     this.state.dragStartCell = cell;
     this.state.lastDragCell = cell;
     this.state.isFillDrag = false;
+    this.state.dragStartPoint = { x: e.clientX, y: e.clientY };
 
-    this.emit(createIntent<BeginDragSelectionIntent>({
-      type: 'BeginDragSelection',
-      row: cell.row,
-      col: cell.col,
-      additive: this.state.isAdditive,
-    }));
+    // Touch long-press detection (500ms hold → context menu)
+    if (e.pointerType === 'touch') {
+      this.state.longPressOrigin = { x: e.clientX, y: e.clientY };
+      this.state.longPressTimer = setTimeout(() => {
+        this.state.longPressTimer = null;
+        const origin = this.state.longPressOrigin;
+        if (!origin) return;
+        const target = this.config.getCellAtPoint(origin.x, origin.y);
+        if (target) {
+          this.emit(createIntent<ShowContextMenuIntent>({
+            type: 'ShowContextMenu',
+            row: target.row,
+            col: target.col,
+            screenX: origin.x,
+            screenY: origin.y,
+          }));
+        }
+        // Cancel drag — user wanted context menu, not selection
+        this.state.isDragging = false;
+        this.state.isPointerDown = false;
+        this.state.longPressOrigin = null;
+      }, 500);
+    }
 
     // Add global listeners for drag
-    document.addEventListener('mousemove', this.handleMouseMove);
-    document.addEventListener('mouseup', this.handleMouseUp);
+    document.addEventListener('pointermove', this.handlePointerMove);
+    document.addEventListener('pointerup', this.handlePointerUp);
+    document.addEventListener('pointercancel', this.handlePointerUp);
 
     e.preventDefault();
+    return true;
   }
 
   /**
-   * Handle mousemove (during drag)
+   * Handle pointermove (during drag — mouse, touch, pen)
    */
-  handleMouseMove(e: MouseEvent): void {
+  handlePointerMove(e: PointerEvent): void {
+    // Cancel long-press if finger moved more than 10px
+    if (this.state.longPressTimer && this.state.longPressOrigin) {
+      const dx = e.clientX - this.state.longPressOrigin.x;
+      const dy = e.clientY - this.state.longPressOrigin.y;
+      if (dx * dx + dy * dy > 100) {
+        clearTimeout(this.state.longPressTimer);
+        this.state.longPressTimer = null;
+        this.state.longPressOrigin = null;
+      }
+    }
+
+    if (!this.state.isPointerDown) return;
+
+    // Check drag threshold before entering drag mode
+    if (!this.state.isDragging && this.state.dragStartPoint && !this.state.isFillDrag) {
+      const dx = e.clientX - this.state.dragStartPoint.x;
+      const dy = e.clientY - this.state.dragStartPoint.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) {
+        return; // Haven't exceeded threshold — still a potential click
+      }
+
+      // Threshold exceeded — transition to drag mode
+      this.state.isDragging = true;
+
+      if (this.state.dragStartCell) {
+        this.emit(createIntent<BeginDragSelectionIntent>({
+          type: 'BeginDragSelection',
+          row: this.state.dragStartCell.row,
+          col: this.state.dragStartCell.col,
+          additive: this.state.isAdditive,
+        }));
+      }
+    }
+
     if (!this.state.isDragging) return;
 
     const cell = this.config.getCellAtPoint(e.clientX, e.clientY);
@@ -422,26 +581,47 @@ export class PointerAdapter {
   }
 
   /**
-   * Handle mouseup (end drag)
+   * Handle pointerup / pointercancel (end drag)
    */
-  handleMouseUp(e: MouseEvent): void {
-    if (!this.state.isDragging) return;
+  handlePointerUp(e: PointerEvent): void {
+    // Always cancel any pending long-press timer
+    if (this.state.longPressTimer) {
+      clearTimeout(this.state.longPressTimer);
+      this.state.longPressTimer = null;
+      this.state.longPressOrigin = null;
+    }
 
-    const cell = this.config.getCellAtPoint(e.clientX, e.clientY);
-    const endCell = cell ?? this.state.dragStartCell;
+    if (!this.state.isPointerDown) return;
 
-    if (endCell) {
-      if (this.state.isFillDrag) {
-        this.emit(createIntent<EndFillDragIntent>({
-          type: 'EndFillDrag',
-          row: endCell.row,
-          col: endCell.col,
-        }));
-      } else {
-        this.emit(createIntent<EndDragSelectionIntent>({
-          type: 'EndDragSelection',
-          row: endCell.row,
-          col: endCell.col,
+    if (this.state.isDragging) {
+      // Drag was in progress — emit EndDragSelection / EndFillDrag
+      const cell = e.type === 'pointercancel'
+        ? (this.state.lastDragCell ?? this.state.dragStartCell)
+        : (this.config.getCellAtPoint(e.clientX, e.clientY) ?? this.state.dragStartCell);
+
+      if (cell) {
+        if (this.state.isFillDrag) {
+          this.emit(createIntent<EndFillDragIntent>({
+            type: 'EndFillDrag',
+            row: cell.row,
+            col: cell.col,
+          }));
+        } else {
+          this.emit(createIntent<EndDragSelectionIntent>({
+            type: 'EndDragSelection',
+            row: cell.row,
+            col: cell.col,
+          }));
+        }
+      }
+    } else {
+      // No drag (click) — emit BeginEdit for single-click editing
+      // Only for plain clicks (no Shift/Ctrl modifiers, which are selection actions)
+      if (e.type !== 'pointercancel' && !this.state.isExtending && !this.state.isAdditive && this.state.dragStartCell) {
+        this.emit(createIntent<BeginEditIntent>({
+          type: 'BeginEdit',
+          row: this.state.dragStartCell.row,
+          col: this.state.dragStartCell.col,
         }));
       }
     }
@@ -450,29 +630,25 @@ export class PointerAdapter {
     this.stopAutoScroll();
 
     // Reset state
+    this.state.isPointerDown = false;
     this.state.isDragging = false;
     this.state.dragStartCell = null;
     this.state.lastDragCell = null;
     this.state.isFillDrag = false;
+    this.state.dragStartPoint = null;
 
     // Remove global listeners
-    document.removeEventListener('mousemove', this.handleMouseMove);
-    document.removeEventListener('mouseup', this.handleMouseUp);
+    document.removeEventListener('pointermove', this.handlePointerMove);
+    document.removeEventListener('pointerup', this.handlePointerUp);
+    document.removeEventListener('pointercancel', this.handlePointerUp);
   }
 
   /**
    * Handle double-click (enter edit mode)
    */
   handleDoubleClick(e: MouseEvent): void {
-    const cell = this.config.getCellAtPoint(e.clientX, e.clientY);
-    if (!cell) return;
-
-    this.emit(createIntent<BeginEditIntent>({
-      type: 'BeginEdit',
-      row: cell.row,
-      col: cell.col,
-    }));
-
+    // Redundant with single-click editing.
+    // Keeping listener bound just in case, but no-op to prevent triple-edit cycles.
     e.preventDefault();
   }
 
@@ -510,15 +686,22 @@ export class PointerAdapter {
   }
 
   /**
-   * Handle mousedown on fill handle
+   * Handle pointerdown on fill handle (supports mouse, touch, pen)
    */
-  handleFillHandleMouseDown(e: MouseEvent, anchorCell: { row: number; col: number }): void {
+  handleFillHandlePointerDown(e: PointerEvent, anchorCell: { row: number; col: number }): void {
     if (e.button !== 0) return;
+
+    // Capture pointer for reliable move/up delivery (critical for touch)
+    (e.target as HTMLElement)?.setPointerCapture?.(e.pointerId);
 
     this.state.isDragging = true;
     this.state.dragStartCell = anchorCell;
     this.state.lastDragCell = anchorCell;
+    this.state.lastDragCell = anchorCell;
     this.state.isFillDrag = true;
+    this.state.isPointerDown = true; // Fix: Ensure pointer is marked down
+    this.state.isAdditive = false;
+    this.state.isExtending = false;
 
     this.emit(createIntent<BeginFillDragIntent>({
       type: 'BeginFillDrag',
@@ -527,8 +710,9 @@ export class PointerAdapter {
     }));
 
     // Add global listeners
-    document.addEventListener('mousemove', this.handleMouseMove);
-    document.addEventListener('mouseup', this.handleMouseUp);
+    document.addEventListener('pointermove', this.handlePointerMove);
+    document.addEventListener('pointerup', this.handlePointerUp);
+    document.addEventListener('pointercancel', this.handlePointerUp);
 
     e.preventDefault();
     e.stopPropagation();
@@ -567,7 +751,7 @@ export class PointerAdapter {
   // Intent Emission
   // ===========================================================================
 
-  private emit(intent: SpreadsheetIntent): void {
+  private emit(intent: PointerIntent): void {
     this.config.onIntent(intent);
   }
 
@@ -579,9 +763,26 @@ export class PointerAdapter {
    * Clean up event listeners and intervals
    */
   dispose(): void {
+    if (this.state.longPressTimer) {
+      clearTimeout(this.state.longPressTimer);
+      this.state.longPressTimer = null;
+      this.state.longPressOrigin = null;
+    }
     this.stopAutoScroll();
-    document.removeEventListener('mousemove', this.handleMouseMove);
-    document.removeEventListener('mouseup', this.handleMouseUp);
+
+    // Reset all pointer state
+    this.state.isPointerDown = false;
+    this.state.isDragging = false;
+    this.state.dragStartPoint = null;
+    this.state.dragStartCell = null;
+    this.state.lastDragCell = null;
+    this.state.isFillDrag = false;
+    this.state.isAdditive = false;
+    this.state.isExtending = false;
+
+    document.removeEventListener('pointermove', this.handlePointerMove);
+    document.removeEventListener('pointerup', this.handlePointerUp);
+    document.removeEventListener('pointercancel', this.handlePointerUp);
   }
 }
 
@@ -593,7 +794,7 @@ import { useRef, useEffect, useCallback } from 'react';
 
 export interface UsePointerAdapterOptions {
   /** Callback when intent is emitted */
-  onIntent: (intent: SpreadsheetIntent) => void;
+  onIntent: (intent: PointerIntent) => void;
   /** Get cell at screen coordinates */
   getCellAtPoint: (x: number, y: number) => { row: number; col: number } | null;
   /** Container element ref */
@@ -661,8 +862,15 @@ export function usePointerAdapter(options: UsePointerAdapterOptions) {
   }, [getViewportBounds, options.autoScrollThreshold, options.autoScrollSpeed]);
 
   // Expose handler functions
-  const handleCellMouseDown = useCallback((e: React.MouseEvent) => {
-    adapterRef.current?.handleMouseDown(e.nativeEvent);
+  const handleCellMouseDown = useCallback((e: React.PointerEvent | React.MouseEvent) => {
+    const handled = adapterRef.current?.handlePointerDown(e.nativeEvent as PointerEvent);
+    // handlePointerDown calls e.preventDefault() to suppress text selection during
+    // drag, but that also prevents the browser's default focus-on-click. Re-focus
+    // the container so keyboard events (type-to-edit, arrow navigation) work.
+    // Only focus when a cell was actually clicked (not on FormulaBar / empty area).
+    if (handled) {
+      (e.currentTarget as HTMLElement)?.focus();
+    }
   }, []);
 
   const handleCellDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -682,8 +890,8 @@ export function usePointerAdapter(options: UsePointerAdapterOptions) {
   }, []);
 
   const handleFillHandleMouseDown = useCallback(
-    (e: React.MouseEvent, anchorCell: { row: number; col: number }) => {
-      adapterRef.current?.handleFillHandleMouseDown(e.nativeEvent, anchorCell);
+    (e: React.PointerEvent | React.MouseEvent, anchorCell: { row: number; col: number }) => {
+      adapterRef.current?.handleFillHandlePointerDown(e.nativeEvent as PointerEvent, anchorCell);
     },
     []
   );

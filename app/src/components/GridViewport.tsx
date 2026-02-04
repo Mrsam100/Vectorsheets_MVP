@@ -45,6 +45,7 @@ import React, {
   useMemo,
   useImperativeHandle,
   forwardRef,
+  memo,
 } from 'react';
 import {
   VirtualRenderer,
@@ -55,6 +56,7 @@ import {
 import type {
   Cell as EngineCell,
   RenderCell as EngineRenderCell,
+  CellFormat,
 } from '../../../engine/core/types/index';
 import {
   GridProvider,
@@ -74,9 +76,12 @@ import {
   type RenderCell,
   type ConditionalFormatResult,
   type FormatPainterUIState,
+  type ContextMenuTarget,
   DEFAULT_GRID_CONFIG,
+  isCellInRange,
 } from './grid';
-import { usePointerAdapter } from './grid/PointerAdapter';
+import { ContextMenu } from './grid/ContextMenu';
+import { usePointerAdapter, type ShowContextMenuIntent } from './grid/PointerAdapter';
 import {
   useIntentHandler,
   type IntentResult,
@@ -92,9 +97,13 @@ import {
   useEditModeIntegration,
   CellEditorOverlay,
   FormulaBar,
-  formatCellAddress,
   FormulaReferenceHighlight,
 } from './grid/editing';
+import { formatCellAddress } from './grid/types';
+import { useA11y } from './A11yProvider';
+import { useTheme } from './ThemeProvider';
+import { useAnimationGuard } from '../hooks/useAnimationGuard';
+import { useVirtualKeyboard } from '../hooks/useVirtualKeyboard';
 
 // =============================================================================
 // Types
@@ -137,6 +146,36 @@ export interface GridViewportProps {
   formatPainterState?: FormatPainterUIState;
   /** Callback when format painter should apply at target cell */
   onFormatPainterApply?: (row: number, col: number) => void;
+  /** Callback when context menu requests row insertion */
+  onInsertRows?: (row: number, count: number) => void;
+  /** Callback when context menu requests row deletion */
+  onDeleteRows?: (startRow: number, endRow: number) => void;
+  /** Callback when context menu requests column insertion */
+  onInsertColumns?: (col: number, count: number) => void;
+  /** Callback when context menu requests column deletion */
+  onDeleteColumns?: (startCol: number, endCol: number) => void;
+  /** Callback when context menu requests cell merge */
+  onMergeCells?: () => void;
+  /** Callback when context menu requests cell unmerge */
+  onUnmergeCells?: () => void;
+  /** Callback when context menu requests format dialog */
+  onShowFormatDialog?: () => void;
+  /** Callback when context menu requests content deletion */
+  onDeleteContents?: () => void;
+  /** Callback when context menu requests clipboard action */
+  onClipboard?: (action: 'copy' | 'cut' | 'paste') => void;
+  /** Callback when undo/redo is requested (keyboard shortcut) */
+  onUndoRedo?: (action: 'undo' | 'redo') => void;
+  /** Callback when format should be applied (keyboard shortcut) */
+  onApplyFormat?: (format: Partial<CellFormat>) => void;
+  /** Callback when Find/Replace dialog should open */
+  onOpenFindReplace?: (mode: 'find' | 'replace') => void;
+  /** Callback when Sort dialog should open */
+  onOpenSortDialog?: () => void;
+  /** Callback when Filter dropdown should open for a column */
+  onOpenFilterDropdown?: (column: number, anchorRect: { x: number; y: number; width: number; height: number }) => void;
+  /** Callback when Data Validation dialog should open */
+  onOpenDataValidation?: () => void;
 }
 
 export interface GridViewportHandle {
@@ -150,6 +189,8 @@ export interface GridViewportHandle {
   getSelection: () => SelectionState;
   setSelection: (selection: SelectionState) => void;
   refresh: () => void;
+  /** Return keyboard focus to the grid container */
+  focus: () => void;
 }
 
 // =============================================================================
@@ -159,6 +200,7 @@ export interface GridViewportHandle {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.1;
+const FORMULA_BAR_HEIGHT = 28; // Matches --formula-bar-height CSS variable
 
 // =============================================================================
 // Utilities
@@ -177,6 +219,8 @@ type CFProvider = (row: number, col: number) => ConditionalFormatResult | null;
 function adaptRenderCell(
   engineCell: EngineRenderCell,
   cfProvider?: CFProvider,
+  frozenRows?: number,
+  frozenCols?: number,
 ): RenderCell {
   const cell = engineCell.cell as EngineCell | null;
 
@@ -248,8 +292,8 @@ function adaptRenderCell(
       : cell?.mergeParent
         ? { isAnchor: false, isHidden: true, anchorRow: cell.mergeParent.row, anchorCol: cell.mergeParent.col }
         : undefined,
-    frozenRow: false,
-    frozenCol: false,
+    frozenRow: engineCell.row < (frozenRows ?? 0),
+    frozenCol: engineCell.col < (frozenCols ?? 0),
   };
 }
 
@@ -257,9 +301,11 @@ function adaptRenderFrame(
   engineFrame: EngineRenderFrame,
   zoom: number,
   cfProvider?: CFProvider,
+  frozenRows?: number,
+  frozenCols?: number,
 ): RenderFrame {
   return {
-    cells: engineFrame.cells.map(c => adaptRenderCell(c, cfProvider)),
+    cells: engineFrame.cells.map(c => adaptRenderCell(c, cfProvider, frozenRows, frozenCols)),
     rows: engineFrame.rows,
     columns: engineFrame.columns,
     scroll: engineFrame.scroll,
@@ -291,7 +337,7 @@ function createMockDimensionProvider(): DimensionProvider {
 // GridViewport Component
 // =============================================================================
 
-export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
+export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProps>(
   (
     {
       className = '',
@@ -312,6 +358,21 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       conditionalFormatProvider,
       formatPainterState,
       onFormatPainterApply,
+      onInsertRows,
+      onDeleteRows,
+      onInsertColumns,
+      onDeleteColumns,
+      onMergeCells,
+      onUnmergeCells,
+      onShowFormatDialog,
+      onDeleteContents,
+      onClipboard,
+      onUndoRedo,
+      onApplyFormat,
+      onOpenFindReplace,
+      onOpenSortDialog,
+      onOpenFilterDropdown,
+      onOpenDataValidation,
     },
     ref
   ) => {
@@ -319,7 +380,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<VirtualRenderer | null>(null);
-    const selectionRef = useRef<SelectionState>(null!); // Ref for avoiding stale closures
+    const selectionRef = useRef<SelectionState>({ activeCell: { row: 0, col: 0 }, ranges: [] }); // Ref for avoiding stale closures
     const zoomRef = useRef(initialZoom);
     const scrollRef = useRef<ScrollState>({ scrollLeft: 0, scrollTop: 0 });
     // Ref for conditional format provider — avoids effect dep on potentially unstable callback
@@ -328,6 +389,8 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     // Refs for format painter — avoids onIntent dep on potentially unstable callback/state
     const formatPainterStateRef = useRef(formatPainterState);
     formatPainterStateRef.current = formatPainterState;
+    const onViewportResizeRef = useRef(onViewportResize);
+    onViewportResizeRef.current = onViewportResize;
     const onFormatPainterApplyRef = useRef(onFormatPainterApply);
     onFormatPainterApplyRef.current = onFormatPainterApply;
 
@@ -347,11 +410,39 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     // Hover cell: tracked only when format painter is active
     const [hoverCell, setHoverCell] = useState<{ row: number; col: number } | null>(null);
     const hoverRafRef = useRef<number | null>(null);
+    // Context menu state
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: ContextMenuTarget } | null>(null);
+    const contextMenuOpenRef = useRef(false);
 
     // Keep refs in sync to avoid stale closures in callbacks
+    contextMenuOpenRef.current = contextMenu !== null;
     selectionRef.current = selection;
     zoomRef.current = zoom;
     scrollRef.current = scroll;
+
+    // --- Accessibility: announce active cell to screen readers ---
+    // Debounced so rapid arrow-key navigation announces only the final cell
+    const { announce } = useA11y();
+    const prevAnnouncedCellRef = useRef<string>('');
+    const announceTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+    useEffect(() => {
+      const cell = selection.activeCell;
+      if (!cell) return;
+      const addr = formatCellAddress(cell.row, cell.col);
+      if (addr === prevAnnouncedCellRef.current) return;
+
+      clearTimeout(announceTimerRef.current);
+      announceTimerRef.current = setTimeout(() => {
+        prevAnnouncedCellRef.current = addr;
+        announce(`Cell ${addr}`);
+      }, 150);
+
+      return () => clearTimeout(announceTimerRef.current);
+    }, [selection.activeCell, announce]);
+
+    const activeCellId = selection.activeCell
+      ? `cell-${selection.activeCell.row}-${selection.activeCell.col}`
+      : undefined;
 
     // Track previous active cell for scroll-to-cell on change
     const prevActiveCellRef = useRef<{ row: number; col: number } | null>(null);
@@ -359,15 +450,35 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
     // Intent handler
     const { handleIntent } = useIntentHandler();
 
-    // Config with zoom-adjusted sizes
-    const config = useMemo<GridConfig>(() => ({
-      ...DEFAULT_GRID_CONFIG,
-      frozenRows,
-      frozenCols,
-      zoom,
-      rowHeaderWidth: Math.round(DEFAULT_GRID_CONFIG.rowHeaderWidth * zoom),
-      colHeaderHeight: Math.round(DEFAULT_GRID_CONFIG.colHeaderHeight * zoom),
-    }), [frozenRows, frozenCols, zoom]);
+    // Density mode — adjusts base sizing to match density.css overrides
+    const { density } = useTheme();
+
+    // Config with density-aware and zoom-adjusted sizes
+    const config = useMemo<GridConfig>(() => {
+      // Base sizing — mirrors density.css compact/cozy overrides
+      let baseColHeaderHeight = DEFAULT_GRID_CONFIG.colHeaderHeight; // 24
+      let baseCellHeight = DEFAULT_GRID_CONFIG.defaultCellHeight;    // 24
+      if (density === 'compact') {
+        baseColHeaderHeight = 20;
+        baseCellHeight = 20;
+      } else if (density === 'cozy') {
+        baseColHeaderHeight = 28;
+        baseCellHeight = 30;
+      }
+
+      return {
+        ...DEFAULT_GRID_CONFIG,
+        defaultCellHeight: baseCellHeight,
+        frozenRows,
+        frozenCols,
+        zoom,
+        rowHeaderWidth: Math.round(DEFAULT_GRID_CONFIG.rowHeaderWidth * zoom),
+        colHeaderHeight: Math.round(baseColHeaderHeight * zoom),
+      };
+    }, [density, frozenRows, frozenCols, zoom]);
+
+    // Formula bar height (needed early for context menu hit-testing)
+    const formulaBarHeight = showFormulaBar ? FORMULA_BAR_HEIGHT : 0;
 
     // Dimension provider
     const dimensions = useMemo(
@@ -401,6 +512,16 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
     // Derive isEditing from edit state for backwards compatibility
     const isEditing = editState.isEditing;
+
+    // Virtual keyboard detection for mobile/tablet editor positioning
+    const keyboard = useVirtualKeyboard();
+
+    // Suppress CSS micro-animations during hot-path interactions
+    useAnimationGuard({
+      isFillDragging: isDragging && fillSourceRange !== null,
+      isAutoScrolling: isDragging,
+      isEditing,
+    });
 
     // Edit mode integration for intent routing
     const { processIntent: processEditIntent, handleCellClick: handleEditCellClick, isPointModeActive } =
@@ -452,7 +573,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       const currentScroll = scrollRef.current;
       renderer.setScroll(currentScroll.scrollLeft, currentScroll.scrollTop);
       const engineFrame = renderer.getRenderFrame();
-      setFrame(adaptRenderFrame(engineFrame, zoom, cfProviderRef.current));
+      setFrame(adaptRenderFrame(engineFrame, zoom, cfProviderRef.current, frozenRows, frozenCols));
     }, [zoom, viewport, renderKey, mergeProvider, conditionalFormatProvider]); // scroll removed — handled synchronously in handleScroll
 
     // Auto-scroll controller (replaces interval-based auto-scroll)
@@ -466,7 +587,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
           renderer.setScroll(newScroll.scrollLeft, newScroll.scrollTop);
           const engineFrame = renderer.getRenderFrame();
           setScroll(newScroll);
-          setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current));
+          setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRows, frozenCols));
         } else {
           setScroll(newScroll);
         }
@@ -532,7 +653,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
             const { width, height } = entry.contentRect;
             setViewport((prev) => {
               if (prev.width !== width || prev.height !== height) {
-                onViewportResize?.({ width, height });
+                onViewportResizeRef.current?.({ width, height });
                 return { width, height };
               }
               return prev;
@@ -551,7 +672,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         if (rafId !== null) cancelAnimationFrame(rafId);
         resizeObserver.disconnect();
       };
-    }, [onViewportResize]);
+    }, []);
 
     // =========================================================================
     // Intent Processing
@@ -594,11 +715,97 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         onFill?.(result.fillRange.from, result.fillRange.to);
       }
 
-      // Note: deleteContents and clipboard are passed to parent via callbacks
-      // These would be handled by onDelete and onClipboard callbacks if added
-    }, [onSelectionChange, onActiveCellChange, onFill, autoScroll]);
+      if (result.deleteContents) {
+        onDeleteContents?.();
+      }
+
+      if (result.clipboard) {
+        onClipboard?.(result.clipboard);
+      }
+
+      if (result.insertRows) {
+        onInsertRows?.(result.insertRows.row, result.insertRows.count);
+      }
+
+      if (result.deleteRows) {
+        onDeleteRows?.(result.deleteRows.startRow, result.deleteRows.endRow);
+      }
+
+      if (result.insertColumns) {
+        onInsertColumns?.(result.insertColumns.col, result.insertColumns.count);
+      }
+
+      if (result.deleteColumns) {
+        onDeleteColumns?.(result.deleteColumns.startCol, result.deleteColumns.endCol);
+      }
+
+      if (result.mergeCells) {
+        onMergeCells?.();
+      }
+
+      if (result.unmergeCells) {
+        onUnmergeCells?.();
+      }
+
+      if (result.showFormatDialog) {
+        onShowFormatDialog?.();
+      }
+
+      if (result.undoRedo) {
+        onUndoRedo?.(result.undoRedo);
+      }
+
+      if (result.applyFormat) {
+        onApplyFormat?.(result.applyFormat);
+      }
+
+      if (result.openFindReplace) {
+        onOpenFindReplace?.(result.openFindReplace);
+      }
+
+      if (result.openSortDialog) {
+        onOpenSortDialog?.();
+      }
+
+      if (result.openFilterDropdown) {
+        onOpenFilterDropdown?.(result.openFilterDropdown.column, result.openFilterDropdown.anchorRect);
+      }
+
+      if (result.openDataValidation) {
+        onOpenDataValidation?.();
+      }
+    }, [onSelectionChange, onActiveCellChange, onFill, autoScroll,
+        onDeleteContents, onClipboard, onInsertRows, onDeleteRows,
+        onInsertColumns, onDeleteColumns, onMergeCells, onUnmergeCells, onShowFormatDialog,
+        onUndoRedo, onApplyFormat, onOpenFindReplace,
+        onOpenSortDialog, onOpenFilterDropdown, onOpenDataValidation]);
 
     const onIntent = useCallback((intent: SpreadsheetIntent) => {
+      // Auto-close context menu on any intent (ref-guarded to avoid wasted calls in hot paths)
+      if (contextMenuOpenRef.current) setContextMenu(null);
+
+      // Touch long-press → show context menu (same as right-click)
+      if (intent.type === 'ShowContextMenu') {
+        const sci = intent as ShowContextMenuIntent;
+        // Select the cell if not already selected (matches right-click behavior)
+        const currentSel = selectionRef.current;
+        const isInSelection = currentSel.ranges.some(r =>
+          isCellInRange(sci.row, sci.col, r)
+        ) || (currentSel.activeCell?.row === sci.row && currentSel.activeCell?.col === sci.col);
+
+        if (!isInSelection) {
+          const result = processEditIntent({
+            type: 'SetActiveCell', row: sci.row, col: sci.col, timestamp: Date.now(),
+          });
+          processIntentResult(result);
+        }
+        setContextMenu({
+          x: sci.screenX, y: sci.screenY,
+          target: { area: 'cell', row: sci.row, col: sci.col },
+        });
+        return;
+      }
+
       // Track drag state for UI feedback (e.g., hide fill handle during drag)
       if (intent.type === 'BeginDragSelection' || intent.type === 'BeginFillDrag') {
         setIsDragging(true);
@@ -671,10 +878,10 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
       const rect = container.getBoundingClientRect();
       const localX = x - rect.left;
-      const localY = y - rect.top;
+      const localY = y - rect.top - formulaBarHeight;
 
       return renderer.getCellAtPoint(localX, localY);
-    }, []);
+    }, [formulaBarHeight]);
 
     // =========================================================================
     // Hover tracking (format painter only — zero overhead when inactive)
@@ -682,9 +889,11 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
     const handleHoverMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
       if (hoverRafRef.current !== null) return;
+      // Capture coords before rAF — SyntheticEvent may be stale by callback time
+      const { clientX, clientY } = e;
       hoverRafRef.current = requestAnimationFrame(() => {
         hoverRafRef.current = null;
-        const cell = getCellAtPoint(e.clientX, e.clientY);
+        const cell = getCellAtPoint(clientX, clientY);
         setHoverCell(prev => {
           if (prev?.row === cell?.row && prev?.col === cell?.col) return prev;
           return cell;
@@ -731,11 +940,13 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
     // Keyboard adapter handles keydown events on the container
     // The hook attaches listeners internally, we just need the edit mode sync
+    const visibleRows = frame ? (frame.visibleRange.endRow - frame.visibleRange.startRow + 1) : 20;
     const { setEditMode: _setKeyboardEditMode } = useKeyboardAdapter({
       onIntent: onKeyboardIntent,
       containerRef: containerRef as React.RefObject<HTMLElement>,
       isEditing,
       enabled: true,
+      visibleRows,
     });
 
     // =========================================================================
@@ -809,6 +1020,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         onSelectionChange?.(newSelection);
       },
       refresh: () => setRenderKey((k) => k + 1),
+      focus: () => containerRef.current?.focus(),
     }), [getZoom, setZoom, zoomIn, zoomOut, resetZoom, scrollToCell, viewport, selection, onSelectionChange]);
 
     // =========================================================================
@@ -819,6 +1031,9 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       const target = e.target as HTMLDivElement;
       const newScrollLeft = target.scrollLeft;
       const newScrollTop = target.scrollTop;
+
+      // Close context menu on scroll (ref-guarded — scroll fires 60+/s)
+      if (contextMenuOpenRef.current) setContextMenu(null);
 
       // Early exit if scroll unchanged (prevents redundant renders from programmatic scroll)
       const current = scrollRef.current;
@@ -831,7 +1046,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         renderer.setScroll(newScrollLeft, newScrollTop);
         const engineFrame = renderer.getRenderFrame();
         setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
-        setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current));
+        setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRows, frozenCols));
       } else {
         setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
       }
@@ -874,9 +1089,10 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       return false;
     }, [selection]);
 
-    // Keyboard zoom
+    // Keyboard zoom (disabled during cell editing to avoid interfering with formula input)
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+        if (editState.isEditing) return; // Don't zoom while editing
         if (e.ctrlKey || e.metaKey) {
           if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn(); }
           else if (e.key === '-') { e.preventDefault(); zoomOut(); }
@@ -888,7 +1104,112 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
         container.addEventListener('keydown', handleKeyDown);
         return () => container.removeEventListener('keydown', handleKeyDown);
       }
-    }, [zoomIn, zoomOut, resetZoom]);
+    }, [zoomIn, zoomOut, resetZoom, editState.isEditing]);
+
+    // =========================================================================
+    // Context Menu
+    // =========================================================================
+
+    const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+
+      // Don't open during drag or editing
+      if (isDragging || isEditing) return;
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top - formulaBarHeight;
+
+      // Hit-test: determine which area was right-clicked
+      let target: ContextMenuTarget;
+
+      // Corner area (intersection of row/col headers) — no context menu
+      if (localY < config.colHeaderHeight && localX < config.rowHeaderWidth) {
+        return;
+      }
+
+      if (localY < config.colHeaderHeight) {
+        // Column header area
+        const cell = getCellAtPoint(e.clientX, e.clientY);
+        target = { area: 'colHeader', row: 0, col: cell?.col ?? 0 };
+      } else if (localX < config.rowHeaderWidth) {
+        // Row header area
+        const cell = getCellAtPoint(e.clientX, e.clientY);
+        target = { area: 'rowHeader', row: cell?.row ?? 0, col: 0 };
+      } else {
+        // Cell area
+        const cell = getCellAtPoint(e.clientX, e.clientY);
+        if (!cell) return;
+        target = { area: 'cell', row: cell.row, col: cell.col };
+      }
+
+      // Selection adjustment: if right-click target is outside current selection,
+      // move selection to the target (matches Excel behavior)
+      const currentSel = selectionRef.current;
+      const isTargetInSelection = (() => {
+        if (target.area === 'rowHeader') {
+          for (const range of currentSel.ranges) {
+            const minRow = Math.min(range.startRow, range.endRow);
+            const maxRow = Math.max(range.startRow, range.endRow);
+            if (target.row >= minRow && target.row <= maxRow) return true;
+          }
+          return currentSel.activeCell?.row === target.row;
+        }
+        if (target.area === 'colHeader') {
+          for (const range of currentSel.ranges) {
+            const minCol = Math.min(range.startCol, range.endCol);
+            const maxCol = Math.max(range.startCol, range.endCol);
+            if (target.col >= minCol && target.col <= maxCol) return true;
+          }
+          return currentSel.activeCell?.col === target.col;
+        }
+        // Cell area
+        for (const range of currentSel.ranges) {
+          if (isCellInRange(target.row, target.col, range)) return true;
+        }
+        return (
+          currentSel.activeCell?.row === target.row &&
+          currentSel.activeCell?.col === target.col
+        );
+      })();
+
+      if (!isTargetInSelection) {
+        if (target.area === 'rowHeader') {
+          onIntent({ type: 'SelectRow', row: target.row, extend: false, additive: false, timestamp: Date.now() });
+        } else if (target.area === 'colHeader') {
+          onIntent({ type: 'SelectColumn', col: target.col, extend: false, additive: false, timestamp: Date.now() });
+        } else {
+          onIntent({ type: 'SetActiveCell', row: target.row, col: target.col, timestamp: Date.now() });
+        }
+      }
+
+      setContextMenu({ x: e.clientX, y: e.clientY, target });
+    }, [isDragging, isEditing, formulaBarHeight, config.colHeaderHeight, config.rowHeaderWidth, getCellAtPoint, onIntent]);
+
+    // Compute context menu helper values
+    const contextMenuIsMultiCell = useMemo(() => {
+      if (!contextMenu) return false;
+      const sel = selection;
+      if (sel.ranges.length === 0) return false;
+      const r = sel.ranges[0];
+      const minRow = Math.min(r.startRow, r.endRow);
+      const maxRow = Math.max(r.startRow, r.endRow);
+      const minCol = Math.min(r.startCol, r.endCol);
+      const maxCol = Math.max(r.startCol, r.endCol);
+      return maxRow > minRow || maxCol > minCol;
+    }, [contextMenu, selection]);
+
+    const contextMenuHasMergedCells = false; // Placeholder — engine merge query not yet available
+
+    // Stable close callback — avoids recreating ContextMenu effects on every render.
+    // Returns focus to the grid so keyboard navigation resumes immediately.
+    const closeContextMenu = useCallback(() => {
+      setContextMenu(null);
+      containerRef.current?.focus();
+    }, []);
 
     // Content bounds
     const contentBounds = frame?.contentBounds ?? { width: 10000, height: 100000 };
@@ -933,6 +1254,10 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       return mergeProvider.getMergeInfo(editState.editingCell.row, editState.editingCell.col) !== null;
     }, [editState.isEditing, editState.editingCell, mergeProvider]);
 
+    const handleEditCancel = useCallback(() => {
+      containerRef.current?.focus();
+    }, []);
+
     // Navigation handlers for editor components
     const handleEditorNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
       const cell = activeCell;
@@ -943,9 +1268,9 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
       switch (direction) {
         case 'up': newRow = Math.max(0, cell.row - 1); break;
-        case 'down': newRow = cell.row + 1; break;
+        case 'down': newRow = Math.min(cell.row + 1, 1048575); break;
         case 'left': newCol = Math.max(0, cell.col - 1); break;
-        case 'right': newCol = cell.col + 1; break;
+        case 'right': newCol = Math.min(cell.col + 1, 16383); break;
       }
 
       setSelection({ activeCell: { row: newRow, col: newCol }, ranges: [] });
@@ -1002,16 +1327,17 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
       isColSelected,
     }), [config, viewport, scroll, frame, selection, handleCellDoubleClick, pointerAdapter.handleRowHeaderClick, pointerAdapter.handleColHeaderClick, handleCornerClick, isCellSelected, isCellActive, isRowSelected, isColSelected]);
 
-    // Calculate formula bar height for positioning
-    const formulaBarHeight = showFormulaBar ? 28 : 0;
-
     return (
       <div
         ref={containerRef}
-        className={`grid-viewport relative w-full h-full overflow-hidden bg-white ${className}`}
+        className={`grid-viewport relative w-full h-full overflow-hidden ${className}`}
         tabIndex={0}
+        role="application"
+        aria-label="Spreadsheet grid"
+        aria-activedescendant={activeCellId}
         data-zoom={zoom}
-        onMouseDown={pointerAdapter.handleCellMouseDown}
+        onPointerDown={pointerAdapter.handleCellMouseDown}
+        onContextMenu={handleContextMenu}
       >
         {/* Formula Bar */}
         {showFormulaBar && (
@@ -1023,10 +1349,7 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
             activeCell={activeCell}
             onEnter={handleEnterNavigation}
             onTab={handleTabNavigation}
-            onCancel={() => {
-              // Focus back to grid after cancel
-              containerRef.current?.focus();
-            }}
+            onCancel={handleEditCancel}
           />
         )}
 
@@ -1114,10 +1437,8 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
                     onEnter={handleEnterNavigation}
                     onTab={handleTabNavigation}
                     onArrowNav={handleEditorNavigation}
-                    onClose={() => {
-                      // Focus back to grid after edit
-                      containerRef.current?.focus();
-                    }}
+                    onClose={handleEditCancel}
+                    keyboardHeight={keyboard.keyboardHeight}
                   />
                 )}
               </div>
@@ -1126,17 +1447,31 @@ export const GridViewport = forwardRef<GridViewportHandle, GridViewportProps>(
 
           {zoom !== 1.0 && (
             <div
-              className="absolute bottom-2 right-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-75 pointer-events-none"
+              className="absolute bottom-2 right-2 px-2 py-1 debug-zoom-badge text-xs rounded opacity-75 pointer-events-none"
               style={{ zIndex: 100 }}
             >
               {Math.round(zoom * 100)}%
             </div>
           )}
         </GridProvider>
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            target={contextMenu.target}
+            selection={selection}
+            isMultiCell={contextMenuIsMultiCell}
+            hasMergedCells={contextMenuHasMergedCells}
+            onIntent={onIntent}
+            onClose={closeContextMenu}
+          />
+        )}
       </div>
     );
   }
-);
+));
 
 GridViewport.displayName = 'GridViewport';
 export default GridViewport;

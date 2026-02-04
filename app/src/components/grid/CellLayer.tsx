@@ -32,6 +32,13 @@ interface CellProps {
   onDoubleClick?: (row: number, col: number, e: React.MouseEvent) => void;
 }
 
+/** Reject CSS color values that could contain URL or expression injection */
+const UNSAFE_COLOR_PATTERN = /url\s*\(|expression\s*\(|import\s|;|}/i;
+function safeColor(value: string): string | undefined {
+  if (UNSAFE_COLOR_PATTERN.test(value)) return undefined;
+  return value;
+}
+
 /**
  * Convert CellFormat to React CSSProperties
  * Pure function - no side effects
@@ -42,7 +49,7 @@ function formatToStyles(format: CellFormat): React.CSSProperties {
   // Typography
   if (format.fontFamily) styles.fontFamily = format.fontFamily;
   if (format.fontSize) styles.fontSize = `${format.fontSize}pt`;
-  if (format.fontColor) styles.color = format.fontColor;
+  if (format.fontColor) styles.color = safeColor(format.fontColor);
   if (format.bold) styles.fontWeight = 'bold';
   if (format.italic) styles.fontStyle = 'italic';
   if (format.underline) styles.textDecoration = 'underline';
@@ -63,12 +70,13 @@ function formatToStyles(format: CellFormat): React.CSSProperties {
           : 'center';
   }
   if (format.textWrap === false) styles.whiteSpace = 'nowrap';
-  if (format.textRotation) {
-    styles.transform = `rotate(${format.textRotation}deg)`;
+  if (format.textRotation && Number.isFinite(format.textRotation)) {
+    const deg = Math.max(0, Math.min(360, format.textRotation));
+    styles.transform = `rotate(${deg}deg)`;
   }
 
   // Background
-  if (format.backgroundColor) styles.backgroundColor = format.backgroundColor;
+  if (format.backgroundColor) styles.backgroundColor = safeColor(format.backgroundColor);
 
   return styles;
 }
@@ -132,6 +140,10 @@ const Cell: React.FC<CellProps> = memo(
     // pre-merged into cell.format by the adapter — no override logic here.
     const formatStyles = formatToStyles(cell.format);
 
+    // Error styling
+    const isError = cell.valueType === 'error';
+    const errorClass = isError ? 'cell-error' : '';
+
     // Position styles (subtract header offset since we're inside scroll container)
     const positionStyles: React.CSSProperties = {
       position: 'absolute',
@@ -141,11 +153,8 @@ const Cell: React.FC<CellProps> = memo(
       height: cell.height,
       zIndex: getCellZIndex(cell),
       ...formatStyles,
+      ...(isError ? { color: 'var(--color-danger)' } : {}),
     };
-
-    // Error styling
-    const isError = cell.valueType === 'error';
-    const errorClass = isError ? 'text-red-600' : '';
 
     // Validation error indicator
     const hasValidationError = cell.validation?.isValid === false;
@@ -158,10 +167,11 @@ const Cell: React.FC<CellProps> = memo(
 
     return (
       <div
-        className={`cell flex items-center px-1 text-sm select-none cursor-cell border-r border-b border-gray-200 overflow-hidden bg-white ${errorClass}`}
+        className={`cell flex items-center px-1 text-sm select-none cursor-cell border-r border-b overflow-hidden ${errorClass}`}
         style={positionStyles}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        id={`cell-${cell.row}-${cell.col}`}
         role="gridcell"
         aria-rowindex={cell.row + 1}
         aria-colindex={cell.col + 1}
@@ -176,7 +186,7 @@ const Cell: React.FC<CellProps> = memo(
             style={{
               left: cell.conditionalFormat.dataBar.direction === 'ltr' ? 0 : undefined,
               right: cell.conditionalFormat.dataBar.direction === 'rtl' ? 0 : undefined,
-              width: `${cell.conditionalFormat.dataBar.percentage}%`,
+              width: `${Math.max(0, Math.min(100, cell.conditionalFormat.dataBar.percentage))}%`,
               backgroundColor: cell.conditionalFormat.dataBar.color,
               opacity: 0.3,
             }}
@@ -198,8 +208,8 @@ const Cell: React.FC<CellProps> = memo(
         {/* Validation error indicator (red triangle) */}
         {hasValidationError && (
           <div
-            className="absolute top-0 right-0 w-0 h-0 border-t-4 border-r-4 border-t-red-500 border-r-red-500"
-            style={{ borderLeft: '4px solid transparent', borderBottom: '4px solid transparent' }}
+            className="absolute top-0 right-0 w-0 h-0 border-t-4 border-r-4"
+            style={{ borderTopColor: 'var(--color-danger)', borderRightColor: 'var(--color-danger)', borderLeft: '4px solid transparent', borderBottom: '4px solid transparent' }}
           />
         )}
       </div>
@@ -225,21 +235,21 @@ const FreezeLines: React.FC<FreezeLinesProps> = memo(
       <>
         {vertical !== null && (
           <div
-            className="freeze-line-vertical absolute top-0 bottom-0 w-px bg-gray-400 pointer-events-none"
+            className="freeze-line-vertical absolute top-0 bottom-0 w-px pointer-events-none"
             style={{
               left: vertical - headerOffset.x,
               zIndex: 60,
-              boxShadow: '2px 0 4px rgba(0,0,0,0.1)',
+              boxShadow: 'var(--shadow-freeze-v)',
             }}
           />
         )}
         {horizontal !== null && (
           <div
-            className="freeze-line-horizontal absolute left-0 right-0 h-px bg-gray-400 pointer-events-none"
+            className="freeze-line-horizontal absolute left-0 right-0 h-px pointer-events-none"
             style={{
               top: horizontal - headerOffset.y,
               zIndex: 60,
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              boxShadow: 'var(--shadow-freeze-h)',
             }}
           />
         )}
@@ -309,8 +319,8 @@ export const CellLayer: React.FC<CellLayerProps> = memo(
           ...style,
         }}
         role="grid"
-        aria-rowcount={frame.visibleRange.endRow - frame.visibleRange.startRow + 1}
-        aria-colcount={frame.visibleRange.endCol - frame.visibleRange.startCol + 1}
+        aria-rowcount={-1}
+        aria-colcount={-1}
       >
         {/* Render all visible cells (memoized — skipped when only selection changed) */}
         {cellElements}

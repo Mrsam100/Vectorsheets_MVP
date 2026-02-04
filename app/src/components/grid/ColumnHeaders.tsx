@@ -42,11 +42,7 @@ const ColumnHeader: React.FC<{
 
   return (
     <div
-      className={`column-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b ${
-        isSelected
-          ? 'bg-blue-100 text-blue-700 border-blue-200'
-          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-      }`}
+      className="column-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b"
       style={{
         left: adjustedLeft,
         width: column.width,
@@ -68,7 +64,7 @@ const ColumnHeader: React.FC<{
 
       {/* Resize handle - right edge */}
       <div
-        className="resize-handle absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 transition-colors"
+        className="resize-handle absolute right-0 top-0 bottom-0 w-1 cursor-col-resize transition-colors"
         onMouseDown={(e) => {
           e.stopPropagation();
           e.preventDefault();
@@ -108,7 +104,7 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
 
     return (
       <div
-        className={`column-headers absolute overflow-hidden bg-gray-50 ${className}`}
+        className={`column-headers absolute overflow-hidden ${className}`}
         style={{
           left: config.rowHeaderWidth,
           top: 0,
@@ -144,8 +140,8 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
 
         {/* Bottom border line for visual separation */}
         <div
-          className="absolute left-0 right-0 bottom-0 h-px bg-gray-300"
-          style={{ zIndex: 25 }}
+          className="absolute left-0 right-0 bottom-0 h-px"
+          style={{ zIndex: 25, backgroundColor: 'var(--color-grid-header-border)' }}
         />
       </div>
     );

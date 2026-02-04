@@ -62,7 +62,8 @@ interface NormalizedRange {
 // =============================================================================
 
 // Numeric key avoids per-cell string allocation during Map.set (hot path on scroll)
-const CELL_KEY_COLS = 16384;
+// Must exceed max column index (16383) to prevent key collisions at boundary
+const CELL_KEY_COLS = 16385;
 function cellKey(row: number, col: number): number {
   return row * CELL_KEY_COLS + col;
 }
@@ -232,16 +233,18 @@ const SelectionRect: React.FC<SelectionRectProps> = memo(
           width: rect.width,
           height: rect.height,
           // Prevent layout thrashing
-          willChange: 'transform',
+          contain: 'layout style',
           // Primary range: darker fill, secondary: lighter fill
           backgroundColor: showFill
             ? isPrimary
-              ? 'rgba(59, 130, 246, 0.12)'
-              : 'rgba(59, 130, 246, 0.06)'
+              ? 'var(--color-selection-fill)'
+              : 'var(--color-selection-secondary-fill)'
             : 'transparent',
           // Border on multi-cell ranges or multi-range selections
           border: showFill
-            ? `1px solid rgba(59, 130, 246, ${isPrimary ? 0.5 : 0.3})`
+            ? isPrimary
+              ? '1px solid var(--color-selection-border)'
+              : '1px solid var(--color-selection-secondary-border)'
             : 'none',
           boxSizing: 'border-box',
           zIndex: isPrimary ? 41 : 40,
@@ -280,17 +283,17 @@ const ActiveCellBorder: React.FC<ActiveCellBorderProps> = memo(
           transform: `translate3d(${x - 1}px, ${y - 1}px, 0)`,
           width: cell.width + 2,
           height: cell.height + 2,
-          willChange: 'transform',
-          // Excel-style blue border
-          border: '2px solid #2563eb',
+          contain: 'layout style',
+          // Excel-style themed border
+          border: '2px solid var(--color-grid-selection-border)',
           boxSizing: 'border-box',
           zIndex: 50,
           // Subtle shadow for depth
-          boxShadow: '0 0 0 1px rgba(37, 99, 235, 0.15)',
+          boxShadow: '0 0 0 1px var(--color-selection-secondary-border)',
           pointerEvents: 'none',
         }}
         role="presentation"
-        aria-label={`Active cell at row ${cell.row + 1}, column ${cell.col + 1}`}
+        aria-hidden="true"
       />
     );
   }
@@ -360,7 +363,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = memo(
             isPrimary: index === selection.ranges.length - 1,
             isSingleCell: isSingleCellRange(normalized),
             // Stable key based on range bounds
-            key: `sel-${normalized.minRow}-${normalized.minCol}-${normalized.maxRow}-${normalized.maxCol}`,
+            key: `sel-${index}-${normalized.minRow}-${normalized.minCol}-${normalized.maxRow}-${normalized.maxCol}`,
           };
         })
         .filter((item): item is NonNullable<typeof item> => item !== null);

@@ -101,8 +101,6 @@ export type {
 
 export {
   FormulaBar,
-  formatCellAddress,
-  columnToLetter,
 } from './FormulaBar';
 
 export type {
@@ -159,7 +157,6 @@ export {
   usePointMode,
   formatCellRef,
   formatRangeRef,
-  columnToLetter as pointModeColumnToLetter,
 } from './usePointMode';
 
 export type {

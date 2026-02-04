@@ -79,128 +79,17 @@ export interface FormulaHintsPanelProps {
 const styles = {
   container: {
     position: 'absolute' as const,
-    backgroundColor: '#ffffff',
-    border: '1px solid #d0d0d0',
-    borderRadius: '4px',
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    fontSize: '12px',
     overflow: 'hidden',
     minWidth: '250px',
     maxWidth: '400px',
   },
-
-  argumentHint: {
-    padding: '8px 12px',
-    backgroundColor: '#f8f9fa',
-    borderBottom: '1px solid #e0e0e0',
-  },
-
-  signature: {
-    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-    fontSize: '12px',
-    lineHeight: '1.4',
-    color: '#333',
-    whiteSpace: 'pre-wrap' as const,
-    wordBreak: 'break-word' as const,
-  },
-
-  highlightedArg: {
-    backgroundColor: '#e3f2fd',
-    color: '#1565c0',
-    fontWeight: 600,
-    padding: '0 2px',
-    borderRadius: '2px',
-  },
-
-  argDescription: {
-    marginTop: '4px',
-    fontSize: '11px',
-    color: '#666',
-    lineHeight: '1.3',
-  },
-
-  argName: {
-    fontWeight: 600,
-    color: '#1565c0',
-  },
-
   suggestionsList: {
     maxHeight: '200px',
     overflowY: 'auto' as const,
     overflowX: 'hidden' as const,
   },
-
   suggestionItem: {
-    padding: '6px 12px',
-    cursor: 'pointer',
-    borderBottom: '1px solid #f0f0f0',
     transition: 'background-color 0.1s ease',
-  },
-
-  suggestionItemSelected: {
-    backgroundColor: '#e3f2fd',
-  },
-
-  suggestionItemHover: {
-    backgroundColor: '#f5f5f5',
-  },
-
-  suggestionName: {
-    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#1a73e8',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-
-  recentBadge: {
-    fontSize: '9px',
-    padding: '1px 4px',
-    backgroundColor: '#e8f5e9',
-    color: '#2e7d32',
-    borderRadius: '3px',
-    fontWeight: 500,
-    textTransform: 'uppercase' as const,
-  },
-
-  suggestionDescription: {
-    fontSize: '11px',
-    color: '#666',
-    marginTop: '2px',
-    lineHeight: '1.3',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-  },
-
-  suggestionSignature: {
-    fontSize: '10px',
-    color: '#888',
-    marginTop: '2px',
-    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-  },
-
-  footer: {
-    padding: '4px 12px',
-    backgroundColor: '#f8f9fa',
-    borderTop: '1px solid #e0e0e0',
-    fontSize: '10px',
-    color: '#888',
-    display: 'flex',
-    justifyContent: 'space-between',
-  },
-
-  kbd: {
-    display: 'inline-block',
-    padding: '1px 4px',
-    backgroundColor: '#e0e0e0',
-    borderRadius: '2px',
-    fontFamily: 'inherit',
-    fontSize: '10px',
-    marginRight: '2px',
   },
 };
 
@@ -237,7 +126,7 @@ const ArgumentHintDisplay = memo(({
 
       // Add the highlighted part
       parts.push(
-        <span key={key++} style={styles.highlightedArg}>
+        <span key={key++} className="formula-hints-highlight">
           {match[1]}
         </span>
       );
@@ -254,11 +143,11 @@ const ArgumentHintDisplay = memo(({
   };
 
   return (
-    <div style={styles.argumentHint} role="tooltip" aria-live="polite">
-      <div style={styles.signature}>{renderSignature()}</div>
+    <div className="formula-hints-arg" role="tooltip" aria-live="polite">
+      <div className="formula-hints-signature" style={{ fontSize: '12px', lineHeight: '1.4', whiteSpace: 'pre-wrap' as any, wordBreak: 'break-word' as any }}>{renderSignature()}</div>
       {hint.currentArg && (
-        <div style={styles.argDescription}>
-          <span style={styles.argName}>{hint.currentArg.name}</span>
+        <div className="formula-hints-arg-desc" style={{ marginTop: '4px', fontSize: '11px', lineHeight: '1.3' }}>
+          <span className="formula-hints-arg-name">{hint.currentArg.name}</span>
           {hint.currentArg.optional && ' (optional)'}
           {': '}
           {hint.currentArg.description}
@@ -293,7 +182,7 @@ const SuggestionItem = memo(({
     if (isSelected && itemRef.current) {
       itemRef.current.scrollIntoView({
         block: 'nearest',
-        behavior: 'smooth',
+        behavior: 'auto',
       });
     }
   }, [isSelected]);
@@ -311,20 +200,17 @@ const SuggestionItem = memo(({
       ref={itemRef}
       role="option"
       aria-selected={isSelected}
-      style={{
-        ...styles.suggestionItem,
-        ...(isSelected ? styles.suggestionItemSelected : {}),
-      }}
+      className={`formula-hints-item ${isSelected ? 'formula-hints-item-selected' : ''}`}
       onMouseEnter={handleMouseEnter}
       onClick={handleClick}
       data-index={index}
     >
-      <div style={styles.suggestionName}>
+      <div className="formula-hints-item-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         {suggestion.name}
-        {suggestion.isRecent && <span style={styles.recentBadge}>Recent</span>}
+        {suggestion.isRecent && <span className="formula-hints-badge">Recent</span>}
       </div>
-      <div style={styles.suggestionDescription}>{suggestion.description}</div>
-      <div style={styles.suggestionSignature}>{suggestion.signature}</div>
+      <div className="formula-hints-desc" style={{ fontSize: '11px', marginTop: '2px', lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{suggestion.description}</div>
+      <div className="formula-hints-sig" style={{ fontSize: '10px', marginTop: '2px' }}>{suggestion.signature}</div>
     </div>
   );
 });
@@ -394,9 +280,9 @@ export const FormulaHintsPanel: React.FC<FormulaHintsPanelProps> = memo(({
   return (
     <div
       ref={containerRef}
-      className={className}
+      className={`formula-hints-panel ${className || ''}`}
       style={containerStyle}
-      role="listbox"
+      role={state.showSuggestions ? "listbox" : undefined}
       aria-label="Formula auto-complete"
       data-formula-hints="true"
     >
@@ -425,13 +311,13 @@ export const FormulaHintsPanel: React.FC<FormulaHintsPanelProps> = memo(({
           </div>
 
           {/* Footer with keyboard hints */}
-          <div style={styles.footer}>
+          <div className="formula-hints-footer" style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between' }}>
             <span>
-              <span style={styles.kbd}>Tab</span>
-              <span style={styles.kbd}>Enter</span> Accept
+              <span className="formula-hints-kbd">Tab</span>
+              <span className="formula-hints-kbd">Enter</span> Accept
             </span>
             <span>
-              <span style={styles.kbd}>Esc</span> Dismiss
+              <span className="formula-hints-kbd">Esc</span> Dismiss
             </span>
           </div>
         </>

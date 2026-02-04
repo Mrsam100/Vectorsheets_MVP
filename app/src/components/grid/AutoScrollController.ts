@@ -71,12 +71,16 @@ export interface AutoScrollConfig {
 export interface EdgeDetectionResult {
   /** Is cursor in any scroll zone? */
   isInScrollZone: boolean;
-  /** Which direction to scroll (null if not in zone) */
+  /** Primary direction to scroll (null if not in zone) */
   direction: ScrollDirection | null;
   /** Calculated scroll speed based on distance from edge */
   speed: number;
   /** Distance from edge (0 = at edge, threshold = at boundary) */
   distanceFromEdge: number;
+  /** Secondary direction for corner-zone diagonal scrolling (null if single-axis) */
+  secondaryDirection: ScrollDirection | null;
+  /** Secondary speed for corner-zone scrolling */
+  secondarySpeed: number;
 }
 
 // =============================================================================
@@ -101,6 +105,8 @@ export class AutoScrollController {
   private lastFrameTime: number = 0;
   private currentDirection: ScrollDirection | null = null;
   private currentSpeed: number = 0;
+  private secondaryDirection: ScrollDirection | null = null;
+  private secondarySpeed: number = 0;
   private isActive: boolean = false;
 
   // Callbacks
@@ -151,56 +157,64 @@ export class AutoScrollController {
    */
   detectEdge(clientX: number, clientY: number): EdgeDetectionResult {
     if (!this.getViewportBounds) {
-      return { isInScrollZone: false, direction: null, speed: 0, distanceFromEdge: 0 };
+      return { isInScrollZone: false, direction: null, speed: 0, distanceFromEdge: 0, secondaryDirection: null, secondarySpeed: 0 };
     }
 
     const bounds = this.getViewportBounds();
     const { threshold } = this.config;
 
-    // Check each edge
+    // Check each edge independently to support compound (diagonal) scrolling
     const topDistance = clientY - bounds.top;
     const bottomDistance = bounds.bottom - clientY;
     const leftDistance = clientX - bounds.left;
     const rightDistance = bounds.right - clientX;
 
-    // Prioritize vertical scrolling over horizontal when in corner zones
+    const result: EdgeDetectionResult = {
+      isInScrollZone: false,
+      direction: null,
+      speed: 0,
+      distanceFromEdge: threshold,
+      secondaryDirection: null,
+      secondarySpeed: 0,
+    };
+
+    // Vertical axis (primary when in corner zones)
     if (topDistance < threshold && topDistance >= 0) {
-      return {
-        isInScrollZone: true,
-        direction: 'up',
-        speed: this.calculateSpeed(threshold - topDistance),
-        distanceFromEdge: topDistance,
-      };
+      result.isInScrollZone = true;
+      result.direction = 'up';
+      result.speed = this.calculateSpeed(threshold - topDistance);
+      result.distanceFromEdge = topDistance;
+    } else if (bottomDistance < threshold && bottomDistance >= 0) {
+      result.isInScrollZone = true;
+      result.direction = 'down';
+      result.speed = this.calculateSpeed(threshold - bottomDistance);
+      result.distanceFromEdge = bottomDistance;
     }
 
-    if (bottomDistance < threshold && bottomDistance >= 0) {
-      return {
-        isInScrollZone: true,
-        direction: 'down',
-        speed: this.calculateSpeed(threshold - bottomDistance),
-        distanceFromEdge: bottomDistance,
-      };
-    }
-
+    // Horizontal axis (secondary when vertical is active, primary otherwise)
     if (leftDistance < threshold && leftDistance >= 0) {
-      return {
-        isInScrollZone: true,
-        direction: 'left',
-        speed: this.calculateSpeed(threshold - leftDistance),
-        distanceFromEdge: leftDistance,
-      };
+      if (result.direction) {
+        result.secondaryDirection = 'left';
+        result.secondarySpeed = this.calculateSpeed(threshold - leftDistance);
+      } else {
+        result.isInScrollZone = true;
+        result.direction = 'left';
+        result.speed = this.calculateSpeed(threshold - leftDistance);
+        result.distanceFromEdge = leftDistance;
+      }
+    } else if (rightDistance < threshold && rightDistance >= 0) {
+      if (result.direction) {
+        result.secondaryDirection = 'right';
+        result.secondarySpeed = this.calculateSpeed(threshold - rightDistance);
+      } else {
+        result.isInScrollZone = true;
+        result.direction = 'right';
+        result.speed = this.calculateSpeed(threshold - rightDistance);
+        result.distanceFromEdge = rightDistance;
+      }
     }
 
-    if (rightDistance < threshold && rightDistance >= 0) {
-      return {
-        isInScrollZone: true,
-        direction: 'right',
-        speed: this.calculateSpeed(threshold - rightDistance),
-        distanceFromEdge: rightDistance,
-      };
-    }
-
-    return { isInScrollZone: false, direction: null, speed: 0, distanceFromEdge: threshold };
+    return result;
   }
 
   /**
@@ -227,21 +241,24 @@ export class AutoScrollController {
   /**
    * Start auto-scrolling in a direction
    */
-  start(direction: ScrollDirection, speed: number): void {
-    // If already scrolling in same direction with similar speed, don't restart
+  start(direction: ScrollDirection, speed: number, secondaryDirection?: ScrollDirection | null, secondarySpeed?: number): void {
+    // If already scrolling in same directions with similar speeds, just update
     if (
       this.isActive &&
       this.currentDirection === direction &&
+      this.secondaryDirection === (secondaryDirection ?? null) &&
       Math.abs(this.currentSpeed - speed) < 2
     ) {
-      // Just update speed
       this.currentSpeed = speed;
+      this.secondarySpeed = secondarySpeed ?? 0;
       return;
     }
 
     this.stop();
     this.currentDirection = direction;
     this.currentSpeed = speed;
+    this.secondaryDirection = secondaryDirection ?? null;
+    this.secondarySpeed = secondarySpeed ?? 0;
     this.isActive = true;
     this.lastFrameTime = performance.now();
     this.animate();
@@ -260,6 +277,8 @@ export class AutoScrollController {
       this.isActive = false;
       this.currentDirection = null;
       this.currentSpeed = 0;
+      this.secondaryDirection = null;
+      this.secondarySpeed = 0;
       this.onScrollComplete?.();
     }
   }
@@ -307,7 +326,7 @@ export class AutoScrollController {
     const currentScroll = this.getCurrentScroll();
     const limits = this.getScrollLimits();
 
-    // Calculate scroll delta
+    // Calculate scroll delta for primary direction
     let deltaX = 0;
     let deltaY = 0;
 
@@ -326,16 +345,32 @@ export class AutoScrollController {
         break;
     }
 
-    // Check bounds and stop if at limit
+    // Calculate scroll delta for secondary direction (corner-zone diagonal)
+    if (this.secondaryDirection) {
+      const secondaryAmount = this.secondarySpeed * timeMultiplier;
+      switch (this.secondaryDirection) {
+        case 'left':
+          deltaX += -secondaryAmount;
+          break;
+        case 'right':
+          deltaX += secondaryAmount;
+          break;
+        case 'up':
+          deltaY += -secondaryAmount;
+          break;
+        case 'down':
+          deltaY += secondaryAmount;
+          break;
+      }
+    }
+
+    // Check bounds — stop only when ALL active axes are at their limits
     const newScrollX = currentScroll.scrollLeft + deltaX;
     const newScrollY = currentScroll.scrollTop + deltaY;
 
-    const atBoundary = (
-      (this.currentDirection === 'up' && newScrollY <= 0) ||
-      (this.currentDirection === 'down' && newScrollY >= limits.maxScrollY) ||
-      (this.currentDirection === 'left' && newScrollX <= 0) ||
-      (this.currentDirection === 'right' && newScrollX >= limits.maxScrollX)
-    );
+    const xAtBoundary = deltaX === 0 || (deltaX < 0 && newScrollX <= 0) || (deltaX > 0 && newScrollX >= limits.maxScrollX);
+    const yAtBoundary = deltaY === 0 || (deltaY < 0 && newScrollY <= 0) || (deltaY > 0 && newScrollY >= limits.maxScrollY);
+    const atBoundary = xAtBoundary && yAtBoundary;
 
     // Apply bounded delta
     const boundedDeltaX = Math.max(-currentScroll.scrollLeft, Math.min(deltaX, limits.maxScrollX - currentScroll.scrollLeft));
@@ -347,12 +382,14 @@ export class AutoScrollController {
     }
 
     // Continue animation only if not at boundary and still active
-    // At boundary: stop animation to avoid CPU spinning - it will restart when cursor moves
-    if (!atBoundary && this.isActive) {
+    // At boundary: fully stop to reset state and avoid zombie animation
+    if (atBoundary) {
+      this.stop();
+      return;
+    }
+    if (this.isActive) {
       this.animationFrameId = requestAnimationFrame(this.animate);
     }
-    // Note: When at boundary, we don't request another frame. The next call to
-    // start() or update() from cursor movement will restart animation if still in scroll zone.
   };
 
   // ===========================================================================
@@ -511,7 +548,7 @@ export function useAutoScroll(options: UseAutoScrollOptions) {
     const result = controller.detectEdge(clientX, clientY);
 
     if (result.isInScrollZone && result.direction) {
-      controller.start(result.direction, result.speed);
+      controller.start(result.direction, result.speed, result.secondaryDirection, result.secondarySpeed);
     } else {
       controller.stop();
     }

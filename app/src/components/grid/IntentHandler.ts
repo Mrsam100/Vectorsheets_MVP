@@ -25,7 +25,7 @@
  */
 
 import type {
-  SpreadsheetIntent as PointerIntent,
+  PointerIntent,
   SetActiveCellIntent,
   ExtendSelectionIntent,
   AddRangeIntent,
@@ -35,6 +35,10 @@ import type {
   SelectRowIntent,
   SelectColumnIntent,
   AutoScrollIntent,
+  InsertRowsIntent,
+  DeleteRowsIntent,
+  InsertColumnsIntent,
+  DeleteColumnsIntent,
 } from './PointerAdapter';
 import type {
   KeyboardIntent,
@@ -61,6 +65,8 @@ export type SpreadsheetIntent = PointerIntent | KeyboardIntent;
 const MAX_ROW = 1048575;
 /** Maximum column index (16K columns) */
 const MAX_COL = 16383;
+/** Maximum number of selection ranges (prevents OOM from rapid Ctrl+Click) */
+const MAX_RANGES = 2048;
 
 // =============================================================================
 // Utilities
@@ -110,6 +116,28 @@ export interface IntentResult {
   applyFormat?: Partial<CellFormat>;
   /** Undo/redo action */
   undoRedo?: 'undo' | 'redo';
+  /** Insert rows at position */
+  insertRows?: { row: number; count: number };
+  /** Delete rows in range (inclusive) */
+  deleteRows?: { startRow: number; endRow: number };
+  /** Insert columns at position */
+  insertColumns?: { col: number; count: number };
+  /** Delete columns in range (inclusive) */
+  deleteColumns?: { startCol: number; endCol: number };
+  /** Merge cells in current selection */
+  mergeCells?: boolean;
+  /** Unmerge cells in current selection */
+  unmergeCells?: boolean;
+  /** Open format cells dialog */
+  showFormatDialog?: boolean;
+  /** Open Find/Replace dialog */
+  openFindReplace?: 'find' | 'replace';
+  /** Open Sort dialog */
+  openSortDialog?: true;
+  /** Open Filter dropdown for a column */
+  openFilterDropdown?: { column: number; anchorRect: { x: number; y: number; width: number; height: number } };
+  /** Open Data Validation dialog */
+  openDataValidation?: true;
 }
 
 // =============================================================================
@@ -160,7 +188,7 @@ export class IntentHandler {
   /**
    * Process an intent and return state updates
    */
-  handle(intent: SpreadsheetIntent, currentSelection: SelectionState): IntentResult {
+  handle(intent: SpreadsheetIntent, currentSelection: SelectionState, isEditing?: boolean): IntentResult {
     switch (intent.type) {
       case 'SetActiveCell':
         return this.handleSetActiveCell(intent);
@@ -233,7 +261,7 @@ export class IntentHandler {
         return { cancelEdit: true };
 
       case 'EscapePressed':
-        return this.handleEscapePressed(currentSelection);
+        return this.handleEscapePressed(currentSelection, isEditing);
 
       case 'SelectAllCells':
         return this.handleSelectAll();
@@ -249,6 +277,54 @@ export class IntentHandler {
 
       case 'UndoRedo':
         return { undoRedo: (intent as { action: 'undo' | 'redo' }).action };
+
+      case 'InsertRows': {
+        let row = (intent as InsertRowsIntent).row;
+        // Resolve sentinels: -1 = above active cell, -2 = below active cell
+        if (row === -1) row = currentSelection.activeCell?.row ?? 0;
+        else if (row === -2) row = Math.min(MAX_ROW, (currentSelection.activeCell?.row ?? 0) + 1);
+        return { insertRows: { row, count: (intent as InsertRowsIntent).count } };
+      }
+
+      case 'DeleteRows':
+        return { deleteRows: { startRow: (intent as DeleteRowsIntent).startRow, endRow: (intent as DeleteRowsIntent).endRow } };
+
+      case 'InsertColumns': {
+        let col = (intent as InsertColumnsIntent).col;
+        // Resolve sentinels: -1 = left of active cell, -2 = right of active cell
+        if (col === -1) col = currentSelection.activeCell?.col ?? 0;
+        else if (col === -2) col = Math.min(MAX_COL, (currentSelection.activeCell?.col ?? 0) + 1);
+        return { insertColumns: { col, count: (intent as InsertColumnsIntent).count } };
+      }
+
+      case 'DeleteColumns':
+        return { deleteColumns: { startCol: (intent as DeleteColumnsIntent).startCol, endCol: (intent as DeleteColumnsIntent).endCol } };
+
+      case 'MergeCells':
+        return { mergeCells: true };
+
+      case 'UnmergeCells':
+        return { unmergeCells: true };
+
+      case 'ShowFormatDialog':
+        return { showFormatDialog: true };
+
+      case 'OpenFindReplace':
+        return { openFindReplace: (intent as { mode: 'find' | 'replace' }).mode };
+
+      case 'OpenSortDialog':
+        return { openSortDialog: true };
+
+      case 'OpenFilterDropdown':
+        return {
+          openFilterDropdown: {
+            column: (intent as { column: number; anchorRect: { x: number; y: number; width: number; height: number } }).column,
+            anchorRect: (intent as { anchorRect: { x: number; y: number; width: number; height: number } }).anchorRect,
+          },
+        };
+
+      case 'OpenDataValidation':
+        return { openDataValidation: true };
 
       default:
         return {};
@@ -312,10 +388,15 @@ export class IntentHandler {
       endCol: cell.col,
     };
 
+    // Cap the number of ranges to prevent memory exhaustion from rapid Ctrl+Click
+    const existingRanges = currentSelection.ranges.length >= MAX_RANGES
+      ? currentSelection.ranges.slice(-MAX_RANGES + 1)
+      : currentSelection.ranges;
+
     return {
       selection: {
         activeCell: cell,
-        ranges: [...currentSelection.ranges, newRange],
+        ranges: [...existingRanges, newRange],
       },
       scrollTo: cell,
     };
@@ -416,11 +497,14 @@ export class IntentHandler {
     }
 
     if (intent.additive) {
-      // Add row to selection
+      // Add row to selection (cap ranges to prevent memory exhaustion)
+      const existingRanges = currentSelection.ranges.length >= MAX_RANGES
+        ? currentSelection.ranges.slice(-MAX_RANGES + 1)
+        : currentSelection.ranges;
       return {
         selection: {
           activeCell: { row, col: 0 },
-          ranges: [...currentSelection.ranges, rowRange],
+          ranges: [...existingRanges, rowRange],
         },
       };
     }
@@ -463,11 +547,14 @@ export class IntentHandler {
     }
 
     if (intent.additive) {
-      // Add column to selection
+      // Add column to selection (cap ranges to prevent memory exhaustion)
+      const existingRanges = currentSelection.ranges.length >= MAX_RANGES
+        ? currentSelection.ranges.slice(-MAX_RANGES + 1)
+        : currentSelection.ranges;
       return {
         selection: {
           activeCell: { row: 0, col },
-          ranges: [...currentSelection.ranges, colRange],
+          ranges: [...existingRanges, colRange],
         },
       };
     }
@@ -540,17 +627,25 @@ export class IntentHandler {
     const minCol = Math.min(originalRange.startCol, originalRange.endCol);
     const maxCol = Math.max(originalRange.startCol, originalRange.endCol);
 
-    // Determine fill direction
+    // Lock fill to a single axis (the one with greater deviation) — matches Excel
+    const rowDev = Math.max(minRow - target.row, target.row - maxRow, 0);
+    const colDev = Math.max(minCol - target.col, target.col - maxCol, 0);
+
     const fillRange: SelectionRange = { ...originalRange };
-    if (target.row < minRow) {
-      fillRange.startRow = target.row;
-    } else if (target.row > maxRow) {
-      fillRange.endRow = target.row;
-    }
-    if (target.col < minCol) {
-      fillRange.startCol = target.col;
-    } else if (target.col > maxCol) {
-      fillRange.endCol = target.col;
+    if (rowDev >= colDev) {
+      // Vertical fill
+      if (target.row < minRow) {
+        fillRange.startRow = target.row;
+      } else if (target.row > maxRow) {
+        fillRange.endRow = target.row;
+      }
+    } else {
+      // Horizontal fill
+      if (target.col < minCol) {
+        fillRange.startCol = target.col;
+      } else if (target.col > maxCol) {
+        fillRange.endCol = target.col;
+      }
     }
 
     return {
@@ -584,18 +679,31 @@ export class IntentHandler {
       return { selection: preSelectionState };
     }
 
-    // Calculate fill range
+    // Calculate fill range (axis-locked — matches Excel)
     const minRow = Math.min(originalRange.startRow, originalRange.endRow);
     const maxRow = Math.max(originalRange.startRow, originalRange.endRow);
     const minCol = Math.min(originalRange.startCol, originalRange.endCol);
     const maxCol = Math.max(originalRange.startCol, originalRange.endCol);
 
-    const fillRange: SelectionRange = {
-      startRow: Math.min(minRow, target.row),
-      startCol: Math.min(minCol, target.col),
-      endRow: Math.max(maxRow, target.row),
-      endCol: Math.max(maxCol, target.col),
-    };
+    const rowDev = Math.max(minRow - target.row, target.row - maxRow, 0);
+    const colDev = Math.max(minCol - target.col, target.col - maxCol, 0);
+
+    let fillRange: SelectionRange;
+    if (rowDev >= colDev) {
+      fillRange = {
+        startRow: Math.min(minRow, target.row),
+        startCol: minCol,
+        endRow: Math.max(maxRow, target.row),
+        endCol: maxCol,
+      };
+    } else {
+      fillRange = {
+        startRow: minRow,
+        startCol: Math.min(minCol, target.col),
+        endRow: maxRow,
+        endCol: Math.max(maxCol, target.col),
+      };
+    }
 
     // Only emit fill if range actually changed
     if (
@@ -637,27 +745,35 @@ export class IntentHandler {
       };
     }
 
-    let newRow = activeCell.row;
-    let newCol = activeCell.col;
+    // When extending (Shift+Arrow), start from the current selection endpoint
+    // instead of activeCell, so perpendicular extensions are preserved.
+    const lastRange = currentSelection.ranges.length > 0
+      ? currentSelection.ranges[currentSelection.ranges.length - 1]
+      : null;
+    const cursorRow = (intent.extend && lastRange) ? lastRange.endRow : activeCell.row;
+    const cursorCol = (intent.extend && lastRange) ? lastRange.endCol : activeCell.col;
+
+    let newRow = cursorRow;
+    let newCol = cursorCol;
 
     // Calculate new position based on direction
     if (intent.jump) {
-      // Ctrl+Arrow: Jump to edge (simplified - actual implementation would check data)
-      // For now, jump by 10 cells or to boundary
-      const jumpAmount = 10;
+      // Ctrl+Arrow: Jump to grid boundary
+      // When engine data is available, this should jump to the next data/empty boundary.
+      // For now, jump to the edge of the grid (correct for empty grids).
       switch (intent.direction) {
-        case 'up': newRow = Math.max(0, activeCell.row - jumpAmount); break;
-        case 'down': newRow = Math.min(MAX_ROW, activeCell.row + jumpAmount); break;
-        case 'left': newCol = Math.max(0, activeCell.col - jumpAmount); break;
-        case 'right': newCol = Math.min(MAX_COL, activeCell.col + jumpAmount); break;
+        case 'up': newRow = 0; break;
+        case 'down': newRow = MAX_ROW; break;
+        case 'left': newCol = 0; break;
+        case 'right': newCol = MAX_COL; break;
       }
     } else {
       // Single cell move
       switch (intent.direction) {
-        case 'up': newRow = Math.max(0, activeCell.row - 1); break;
-        case 'down': newRow = Math.min(MAX_ROW, activeCell.row + 1); break;
-        case 'left': newCol = Math.max(0, activeCell.col - 1); break;
-        case 'right': newCol = Math.min(MAX_COL, activeCell.col + 1); break;
+        case 'up': newRow = Math.max(0, cursorRow - 1); break;
+        case 'down': newRow = Math.min(MAX_ROW, cursorRow + 1); break;
+        case 'left': newCol = Math.max(0, cursorCol - 1); break;
+        case 'right': newCol = Math.min(MAX_COL, cursorCol + 1); break;
       }
     }
 
@@ -665,7 +781,7 @@ export class IntentHandler {
 
     if (intent.extend) {
       // Shift+Arrow: Extend selection from anchor (activeCell stays fixed)
-      // The anchor is always the activeCell, and the selection extends to the new position
+      // Preserve any prior ranges (from Ctrl+Click) and only modify the last one
       const range: SelectionRange = {
         startRow: activeCell.row,
         startCol: activeCell.col,
@@ -673,10 +789,15 @@ export class IntentHandler {
         endCol: newCell.col,
       };
 
+      // Keep all existing ranges except the last one (which we're extending)
+      const priorRanges = currentSelection.ranges.length > 1
+        ? currentSelection.ranges.slice(0, -1)
+        : [];
+
       return {
         selection: {
           activeCell, // Anchor stays fixed during extend
-          ranges: [range],
+          ranges: [...priorRanges, range],
         },
         scrollTo: newCell, // Scroll to see the extended edge
       };
@@ -694,16 +815,23 @@ export class IntentHandler {
     currentSelection: SelectionState
   ): IntentResult {
     const activeCell = currentSelection.activeCell ?? { row: 0, col: 0 };
-    const pageSize = 20; // Typical visible rows
+    const pageSize = intent.pageSize ?? 20;
 
-    let newRow = activeCell.row;
+    // When extending, start from current selection endpoint to preserve perpendicular extent
+    const lastRange = currentSelection.ranges.length > 0
+      ? currentSelection.ranges[currentSelection.ranges.length - 1]
+      : null;
+    const cursorRow = (intent.extend && lastRange) ? lastRange.endRow : activeCell.row;
+    const cursorCol = (intent.extend && lastRange) ? lastRange.endCol : activeCell.col;
+
+    let newRow = cursorRow;
     if (intent.direction === 'up') {
-      newRow = Math.max(0, activeCell.row - pageSize);
+      newRow = Math.max(0, cursorRow - pageSize);
     } else {
-      newRow = Math.min(MAX_ROW, activeCell.row + pageSize);
+      newRow = Math.min(MAX_ROW, cursorRow + pageSize);
     }
 
-    const newCell = clampCell(newRow, activeCell.col);
+    const newCell = clampCell(newRow, cursorCol);
 
     if (intent.extend) {
       // Shift+PageUp/Down: Extend selection from anchor (activeCell stays fixed)
@@ -711,7 +839,7 @@ export class IntentHandler {
         startRow: activeCell.row,
         startCol: activeCell.col,
         endRow: newCell.row,
-        endCol: activeCell.col,
+        endCol: cursorCol,
       };
 
       return {
@@ -732,8 +860,15 @@ export class IntentHandler {
   ): IntentResult {
     const activeCell = currentSelection.activeCell ?? { row: 0, col: 0 };
 
-    let newRow = activeCell.row;
-    let newCol = activeCell.col;
+    // When extending, start from current selection endpoint to preserve perpendicular extent
+    const lastRange = currentSelection.ranges.length > 0
+      ? currentSelection.ranges[currentSelection.ranges.length - 1]
+      : null;
+    const cursorRow = (intent.extend && lastRange) ? lastRange.endRow : activeCell.row;
+    const cursorCol = (intent.extend && lastRange) ? lastRange.endCol : activeCell.col;
+
+    let newRow = cursorRow;
+    let newCol = cursorCol;
 
     if (intent.target === 'home') {
       if (intent.documentLevel) {
@@ -747,12 +882,15 @@ export class IntentHandler {
     } else {
       // End
       if (intent.documentLevel) {
-        // Ctrl+End: Go to last used cell (simplified: go to Z1000)
-        newRow = 999;
-        newCol = 25;
+        // Ctrl+End: Go to last used cell
+        // When engine data is available, this should use getLastUsedCell().
+        // For now, go to the grid boundary (correct for empty grids).
+        newRow = MAX_ROW;
+        newCol = MAX_COL;
       } else {
-        // End: Go to last column with data (simplified: column Z)
-        newCol = 25;
+        // End: Go to the last column in current row
+        // When engine data is available, this should find the last data column in the row.
+        newCol = MAX_COL;
       }
     }
 
@@ -785,18 +923,64 @@ export class IntentHandler {
   ): IntentResult {
     const activeCell = currentSelection.activeCell ?? { row: 0, col: 0 };
 
+    // Check if there's a non-degenerate selection range to cycle within
+    const range = currentSelection.ranges.length > 0 ? currentSelection.ranges[0] : null;
+    const hasRange = range && (
+      range.startRow !== range.endRow || range.startCol !== range.endCol
+    );
+
+    if (hasRange && range) {
+      // Cycle within selected range (matches Excel behavior)
+      const minRow = Math.min(range.startRow, range.endRow);
+      const maxRow = Math.max(range.startRow, range.endRow);
+      const minCol = Math.min(range.startCol, range.endCol);
+      const maxCol = Math.max(range.startCol, range.endCol);
+
+      let newRow = activeCell.row;
+      let newCol = activeCell.col;
+
+      if (intent.key === 'tab') {
+        // Tab cycles horizontally within range, wrapping to next/prev row
+        if (intent.reverse) {
+          newCol--;
+          if (newCol < minCol) { newCol = maxCol; newRow--; }
+          if (newRow < minRow) { newRow = maxRow; } // wrap to bottom
+        } else {
+          newCol++;
+          if (newCol > maxCol) { newCol = minCol; newRow++; }
+          if (newRow > maxRow) { newRow = minRow; } // wrap to top
+        }
+      } else {
+        // Enter cycles vertically within range, wrapping to next/prev column
+        if (intent.reverse) {
+          newRow--;
+          if (newRow < minRow) { newRow = maxRow; newCol--; }
+          if (newCol < minCol) { newCol = maxCol; } // wrap to right
+        } else {
+          newRow++;
+          if (newRow > maxRow) { newRow = minRow; newCol++; }
+          if (newCol > maxCol) { newCol = minCol; } // wrap to left
+        }
+      }
+
+      const newCell = clampCell(newRow, newCol);
+      return {
+        selection: { activeCell: newCell, ranges: currentSelection.ranges },
+        scrollTo: newCell,
+      };
+    }
+
+    // No selection range — move to adjacent cell
     let newRow = activeCell.row;
     let newCol = activeCell.col;
 
     if (intent.key === 'tab') {
-      // Tab moves horizontally
       if (intent.reverse) {
         newCol = Math.max(0, activeCell.col - 1);
       } else {
         newCol = Math.min(MAX_COL, activeCell.col + 1);
       }
     } else {
-      // Enter moves vertically
       if (intent.reverse) {
         newRow = Math.max(0, activeCell.row - 1);
       } else {
@@ -834,8 +1018,12 @@ export class IntentHandler {
     };
   }
 
-  private handleEscapePressed(currentSelection: SelectionState): IntentResult {
-    // Escape clears selection ranges but keeps active cell
+  private handleEscapePressed(currentSelection: SelectionState, isEditing?: boolean): IntentResult {
+    // If editing, always cancel edit first (matches Excel: Escape cancels edit, second Escape clears selection)
+    if (isEditing) {
+      return { cancelEdit: true };
+    }
+    // Not editing: clear selection ranges but keep active cell
     if (currentSelection.ranges.length > 0) {
       return {
         selection: {
@@ -844,7 +1032,6 @@ export class IntentHandler {
         },
       };
     }
-    // If no ranges, just signal cancel (edit mode will handle this)
     return { cancelEdit: true };
   }
 
@@ -873,8 +1060,8 @@ export function useIntentHandler() {
   }
 
   const handleIntent = useCallback(
-    (intent: SpreadsheetIntent, selection: SelectionState): IntentResult => {
-      return handlerRef.current!.handle(intent, selection);
+    (intent: SpreadsheetIntent, selection: SelectionState, isEditing?: boolean): IntentResult => {
+      return handlerRef.current!.handle(intent, selection, isEditing);
     },
     []
   );

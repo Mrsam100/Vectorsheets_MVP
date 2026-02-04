@@ -31,7 +31,6 @@ import React, {
   useCallback,
   useState,
   memo,
-  useLayoutEffect,
 } from 'react';
 import type { EditModeState, EditModeActions } from './useEditMode';
 import { useFormulaAutoComplete } from './useFormulaAutoComplete';
@@ -60,43 +59,7 @@ const MAX_EDIT_HISTORY = 100;
  */
 const UNDO_DEBOUNCE_MS = 300;
 
-/**
- * Style ID for formula bar styles (injected once)
- */
-const STYLE_ID = 'formula-bar-styles';
-
-/**
- * Ensure formula bar styles are injected once
- */
-function ensureStyles(): void {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById(STYLE_ID)) return;
-
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .formula-bar-input {
-      caret-color: #1a73e8;
-    }
-
-    .formula-bar-input:focus {
-      outline: none;
-    }
-
-    .formula-bar-input::selection {
-      background-color: rgba(26, 115, 232, 0.3);
-    }
-
-    .formula-bar[data-mode="point"] .formula-bar-input {
-      caret-color: #34a853;
-    }
-
-    .formula-bar[data-mode="point"] .formula-bar-input::selection {
-      background-color: rgba(52, 168, 83, 0.3);
-    }
-  `;
-  document.head.appendChild(style);
-}
+// Editor styles (caret, selection) moved to index.css — themed via CSS custom properties
 
 // =============================================================================
 // Types
@@ -154,31 +117,6 @@ export interface FunctionHint {
 interface EditHistoryEntry {
   value: string;
   cursorPosition: number;
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Convert column number to letter (0 = A, 1 = B, etc.)
- */
-function columnToLetter(col: number): string {
-  let result = '';
-  let n = col + 1;
-  while (n > 0) {
-    n--;
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26);
-  }
-  return result;
-}
-
-/**
- * Format cell reference as A1-style address
- */
-function formatCellAddress(row: number, col: number): string {
-  return `${columnToLetter(col)}${row + 1}`;
 }
 
 // =============================================================================
@@ -314,7 +252,16 @@ const NameBox: React.FC<{
 }> = memo(({ address, onClick }) => (
   <div
     className="formula-bar-namebox"
+    role="button"
+    tabIndex={0}
+    aria-label={`Name box: ${address}`}
     onClick={onClick}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick?.();
+      }
+    }}
     style={{
       width: 60,
       minWidth: 60,
@@ -352,10 +299,10 @@ const FunctionHintTooltip: React.FC<{
       left: 60,
       marginTop: 4,
       padding: '8px 12px',
-      backgroundColor: 'white',
+      backgroundColor: 'var(--color-bg-surface)',
       border: '1px solid var(--color-border-primary, #e2e8f0)',
       borderRadius: 4,
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+      boxShadow: 'var(--shadow-dropdown)',
       zIndex: 1000,
       maxWidth: 400,
       fontFamily: 'var(--font-family-ui, sans-serif)',
@@ -364,14 +311,14 @@ const FunctionHintTooltip: React.FC<{
   >
     {/* Function signature */}
     <div style={{ fontWeight: 600, marginBottom: 4 }}>
-      <span style={{ color: '#1a73e8' }}>{hint.name}</span>
-      <span style={{ color: '#5f6368' }}>(</span>
+      <span style={{ color: 'var(--color-accent)' }}>{hint.name}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>(</span>
       {hint.arguments.map((arg, i) => (
         <span key={arg.name}>
-          {i > 0 && <span style={{ color: '#5f6368' }}>, </span>}
+          {i > 0 && <span style={{ color: 'var(--color-text-secondary)' }}>, </span>}
           <span
             style={{
-              color: i === hint.activeArgumentIndex ? '#1a73e8' : '#5f6368',
+              color: i === hint.activeArgumentIndex ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               fontWeight: i === hint.activeArgumentIndex ? 600 : 400,
               textDecoration: arg.optional ? 'underline dotted' : 'none',
             }}
@@ -380,17 +327,17 @@ const FunctionHintTooltip: React.FC<{
           </span>
         </span>
       ))}
-      <span style={{ color: '#5f6368' }}>)</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>)</span>
     </div>
 
     {/* Function description */}
-    <div style={{ color: '#5f6368', marginBottom: 4 }}>
+    <div style={{ color: 'var(--color-text-secondary)', marginBottom: 4 }}>
       {hint.description}
     </div>
 
     {/* Active argument description */}
     {hint.activeArgumentIndex !== undefined && hint.arguments[hint.activeArgumentIndex] && (
-      <div style={{ color: '#1a73e8', fontStyle: 'italic' }}>
+      <div style={{ color: 'var(--color-accent)', fontStyle: 'italic' }}>
         {hint.arguments[hint.activeArgumentIndex].name}:{' '}
         {hint.arguments[hint.activeArgumentIndex].description}
       </div>
@@ -436,13 +383,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   functionHint,
   enableAutoComplete = true,
 }) => {
-  // Ensure styles are injected
-  useLayoutEffect(() => {
-    ensureStyles();
-  }, []);
+  // Editor styles now in index.css (themed)
 
   const inputRef = useRef<HTMLInputElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref mirrors state to avoid stale closures in rapid-fire callbacks
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [isExpanded, setIsExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const isComposingRef = useRef(false);
@@ -454,10 +401,16 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     state.isEditing
   );
 
+  // Refs for canUndo/canRedo to avoid stale closures in handleKeyDown
+  const canUndoRef = useRef(canUndo);
+  canUndoRef.current = canUndo;
+  const canRedoRef = useRef(canRedo);
+  canRedoRef.current = canRedo;
+
   // Formula auto-complete hook
   const handleAutoCompleteAccept = useCallback((result: AcceptResult) => {
     // Replace the current token with the accepted suggestion
-    const currentValue = state.value;
+    const currentValue = stateRef.current.value;
     const newValue =
       currentValue.slice(0, result.replaceStart) +
       result.insertText +
@@ -465,7 +418,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
     actions.setValue(newValue);
     actions.setCursorPosition(result.replaceStart + result.cursorOffset);
-  }, [state.value, actions]);
+  }, [actions]);
 
   const {
     state: autoCompleteState,
@@ -531,7 +484,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     if (isComposingRef.current) return;
 
     const newValue = e.target.value;
-    const oldValue = state.value;
+    const oldValue = stateRef.current.value;
+    const currentMode = stateRef.current.mode;
     const cursorPos = e.target.selectionStart ?? newValue.length;
 
     actions.setValue(newValue);
@@ -546,7 +500,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     if (
       newValue.startsWith('=') &&
       newValue.length > oldValue.length &&
-      state.mode === 'edit' &&
+      currentMode === 'edit' &&
       cursorPos > 0
     ) {
       const addedChar = newValue[cursorPos - 1];
@@ -555,20 +509,20 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
         actions.setMode('point');
       }
     }
-  }, [actions, state.value, state.mode, pushHistory]);
+  }, [actions, pushHistory]);
 
-  // Handle focus
+  // Handle focus — uses stateRef to avoid re-creating closure on every isEditing change
   const handleFocus = useCallback(() => {
     setIsFocused(true);
     actions.setFormulaBarFocused(true);
 
     // If not editing but have an active cell, start editing
-    if (!state.isEditing && activeCell) {
+    if (!stateRef.current.isEditing && activeCell) {
       actions.startEditing(activeCell, activeCellValue);
     }
 
     onFocus?.();
-  }, [state.isEditing, activeCell, actions, activeCellValue, onFocus]);
+  }, [activeCell, actions, activeCellValue, onFocus]);
 
   // Handle blur - guards against IME composition and stale double-fires
   const handleBlur = useCallback((e: React.FocusEvent) => {
@@ -593,14 +547,17 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
       blurTimeoutRef.current = null;
       // Re-check composition (may have started between blur and timeout)
       if (isComposingRef.current) return;
+      // Guard against double-commit (Enter/Tab/Escape may have already committed)
+      if (hasCommittedRef.current) return;
       if (!document.activeElement?.closest('[data-edit-component]') &&
           !document.activeElement?.closest('[data-cell-editor]')) {
-        if (state.isEditing) {
+        if (stateRef.current.isEditing) {
+          hasCommittedRef.current = true;
           actions.confirmEdit();
         }
       }
     }, 0);
-  }, [actions, state.isEditing]);
+  }, [actions]);
 
   // Handle composition events (IME) - uses ref for synchronous guard
   const handleCompositionStart = useCallback(() => {
@@ -657,7 +614,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
-        if (state.isEditing && !hasCommittedRef.current) {
+        if (stateRef.current.isEditing && !hasCommittedRef.current) {
           hasCommittedRef.current = true;
           actions.confirmEdit();
           onEnter?.(e.shiftKey);
@@ -666,7 +623,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
       case 'Tab':
         e.preventDefault();
-        if (state.isEditing && !hasCommittedRef.current) {
+        if (stateRef.current.isEditing && !hasCommittedRef.current) {
           hasCommittedRef.current = true;
           actions.confirmEdit();
           onTab?.(e.shiftKey);
@@ -675,7 +632,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
       case 'Escape':
         e.preventDefault();
-        if (state.isEditing && !hasCommittedRef.current) {
+        if (stateRef.current.isEditing && !hasCommittedRef.current) {
           hasCommittedRef.current = true;
           actions.cancelEdit();
           onCancel?.();
@@ -684,7 +641,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
       case 'F2':
         e.preventDefault();
-        if (state.isEditing) {
+        if (stateRef.current.isEditing) {
           actions.cycleMode();
         }
         break;
@@ -701,7 +658,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
           e.preventDefault();
           if (e.shiftKey) {
             // Ctrl+Shift+Z = Redo
-            if (canRedo) {
+            if (canRedoRef.current) {
               const entry = redo();
               if (entry) {
                 actions.setValue(entry.value);
@@ -710,7 +667,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
             }
           } else {
             // Ctrl+Z = Undo
-            if (canUndo) {
+            if (canUndoRef.current) {
               const entry = undo();
               if (entry) {
                 actions.setValue(entry.value);
@@ -724,7 +681,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
       case 'y':
         if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
-          if (canRedo) {
+          if (canRedoRef.current) {
             const entry = redo();
             if (entry) {
               actions.setValue(entry.value);
@@ -734,7 +691,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
         }
         break;
     }
-  }, [state.isEditing, actions, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, canUndo, canRedo, undo, redo]);
+  }, [actions, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, undo, redo]);
 
   // Sync selection changes from native input
   const handleSelect = useCallback(() => {
@@ -753,8 +710,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
   // Handle expand toggle
   const handleExpandToggle = useCallback(() => {
-    setIsExpanded(!isExpanded);
-  }, [isExpanded]);
+    setIsExpanded(prev => !prev);
+  }, []);
 
   // Container styles
   const containerStyle: React.CSSProperties = {
@@ -794,9 +751,9 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   const getModeIndicatorColor = () => {
     if (!state.isEditing) return 'transparent';
     switch (state.mode) {
-      case 'edit': return '#1a73e8';
-      case 'enter': return '#fbbc04';
-      case 'point': return '#34a853';
+      case 'edit': return 'var(--color-mode-edit)';
+      case 'enter': return 'var(--color-mode-enter)';
+      case 'point': return 'var(--color-mode-point)';
       default: return 'transparent';
     }
   };
@@ -855,6 +812,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
           onBlur={handleBlur}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
+          maxLength={32767}
           placeholder={state.isEditing ? '' : 'Select a cell to see its value'}
           autoComplete="off"
           autoCorrect="off"
@@ -914,5 +872,4 @@ FormulaBar.displayName = 'FormulaBar';
 // Exports
 // =============================================================================
 
-export { formatCellAddress, columnToLetter };
 export default FormulaBar;

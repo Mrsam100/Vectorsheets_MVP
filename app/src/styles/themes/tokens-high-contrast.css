@@ -1,0 +1,174 @@
+/**
+ * High Contrast Theme Tokens — VectorSheet accessibility mode
+ *
+ * Activated via [data-vs-theme="high-contrast"] on <html>.
+ * Pure black backgrounds, bright borders (cyan), yellow accent.
+ * Designed for users with low vision or who need maximum contrast.
+ */
+
+[data-vs-theme="high-contrast"] {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------------------------------
+     Surface — pure black
+     --------------------------------------------------------------------------- */
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-tertiary: #1a1a1a;
+  --color-bg-hover: #2a2a2a;
+  --color-bg-surface: #000000;
+
+  /* ---------------------------------------------------------------------------
+     Text — maximum contrast white
+     --------------------------------------------------------------------------- */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e0e0e0;
+  --color-text-muted: #b0b0b0;
+  --color-text-on-accent: #000000;
+
+  /* ---------------------------------------------------------------------------
+     Border — bright cyan for visibility
+     --------------------------------------------------------------------------- */
+  --color-border-primary: #6fc3df;
+  --color-border-secondary: #6fc3df;
+  --color-border-focus: #fce94f;
+
+  /* ---------------------------------------------------------------------------
+     Accent — high-vis yellow
+     --------------------------------------------------------------------------- */
+  --color-accent: #fce94f;
+  --color-accent-hover: #ffff00;
+  --color-accent-light: rgba(252, 233, 79, 0.2);
+
+  /* ---------------------------------------------------------------------------
+     Grid
+     --------------------------------------------------------------------------- */
+  --color-grid-line: #6fc3df;
+  --color-grid-header-bg: #1a1a1a;
+  --color-grid-header-border: #6fc3df;
+  --color-grid-cell-bg: #000000;
+  --color-grid-cell-selected: rgba(252, 233, 79, 0.15);
+  --color-grid-selection-border: #fce94f;
+
+  /* ---------------------------------------------------------------------------
+     Header States
+     --------------------------------------------------------------------------- */
+  --color-header-hover: #2a2a2a;
+  --color-header-selected-bg: rgba(252, 233, 79, 0.2);
+  --color-header-selected-text: #fce94f;
+  --color-header-selected-border: #fce94f;
+  --color-header-gradient-light: rgba(255, 255, 255, 0.02);
+  --color-header-gradient-dark: rgba(0, 0, 0, 0.05);
+
+  /* ---------------------------------------------------------------------------
+     Button States
+     --------------------------------------------------------------------------- */
+  --color-btn-active-bg: #3a3a3a;
+  --color-btn-pressed-bg: rgba(252, 233, 79, 0.15);
+  --color-btn-pressed-border: #fce94f;
+  --color-btn-pressed-hover-bg: rgba(252, 233, 79, 0.2);
+  --color-btn-pressed-hover-border: #ffff00;
+  --color-btn-pressed-active-bg: rgba(252, 233, 79, 0.25);
+  --color-btn-pressed-active-border: #ffff00;
+
+  /* ---------------------------------------------------------------------------
+     Selection Overlay
+     --------------------------------------------------------------------------- */
+  --color-selection-fill: rgba(252, 233, 79, 0.15);
+  --color-selection-border: #fce94f;
+  --color-selection-secondary-fill: rgba(252, 233, 79, 0.08);
+  --color-selection-secondary-border: rgba(252, 233, 79, 0.6);
+
+  /* ---------------------------------------------------------------------------
+     Fill Handle
+     --------------------------------------------------------------------------- */
+  --color-fill-handle: #fce94f;
+  --color-fill-handle-hover: #ffff00;
+  --color-fill-handle-active: #e0cc00;
+  --color-fill-handle-border: #000000;
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Lines
+     --------------------------------------------------------------------------- */
+  --color-freeze-line: #6fc3df;
+
+  /* ---------------------------------------------------------------------------
+     Semantic Status Colors
+     --------------------------------------------------------------------------- */
+  --color-danger: #ff6b6b;
+  --color-danger-light: #2a0000;
+  --color-danger-border: #ff6b6b;
+  --color-danger-border-hover: #ff9999;
+  --color-warning: #fce94f;
+  --color-warning-text: #fce94f;
+  --color-warning-bg: #2a2500;
+  --color-success-bg: #33cc66;
+  --color-success-bg-hover: #44dd77;
+  --color-success-bg-active: #22bb55;
+
+  /* ---------------------------------------------------------------------------
+     Dialog / Overlay
+     --------------------------------------------------------------------------- */
+  --color-backdrop: rgba(0, 0, 0, 0.7);
+
+  /* ---------------------------------------------------------------------------
+     Focus — bright yellow ring
+     --------------------------------------------------------------------------- */
+  --color-focus-ring: rgba(252, 233, 79, 0.6);
+  --color-focus-ring-strong: rgba(252, 233, 79, 0.8);
+
+  /* ---------------------------------------------------------------------------
+     Cell
+     --------------------------------------------------------------------------- */
+  --color-cell-hover: rgba(255, 255, 255, 0.05);
+  --color-marching-ants: #fce94f;
+
+  /* ---------------------------------------------------------------------------
+     Swatch / Color Picker
+     --------------------------------------------------------------------------- */
+  --color-swatch-border: rgba(255, 255, 255, 0.25);
+
+  /* ---------------------------------------------------------------------------
+     Active Cell
+     --------------------------------------------------------------------------- */
+  --color-active-cell-inset: rgba(0, 0, 0, 0.5);
+
+  /* ---------------------------------------------------------------------------
+     Warning Focus
+     --------------------------------------------------------------------------- */
+  --color-warning-focus-ring: rgba(252, 233, 79, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Editor Mode
+     --------------------------------------------------------------------------- */
+  --color-mode-edit: #fce94f;
+  --color-mode-point: #73d216;
+  --color-mode-enter: #fcaf3e;
+  --color-editor-selection: rgba(252, 233, 79, 0.3);
+  --color-editor-point-selection: rgba(115, 210, 22, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Format Painter
+     --------------------------------------------------------------------------- */
+  --color-format-painter: #73d216;
+  --color-format-painter-fill: rgba(115, 210, 22, 0.1);
+  --color-format-painter-hover: rgba(115, 210, 22, 0.15);
+  --color-format-painter-border: rgba(115, 210, 22, 0.5);
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Shadows
+     --------------------------------------------------------------------------- */
+  --shadow-freeze-v: 2px 0 4px rgba(0, 0, 0, 0.4);
+  --shadow-freeze-h: 0 2px 4px rgba(0, 0, 0, 0.4);
+
+  /* ---------------------------------------------------------------------------
+     Shadows (minimal — rely on borders for definition)
+     --------------------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  --shadow-dropdown: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --shadow-dialog: 0 20px 60px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-context: 0 2px 6px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-fill-handle: 0 1px 3px rgba(0, 0, 0, 0.6);
+}

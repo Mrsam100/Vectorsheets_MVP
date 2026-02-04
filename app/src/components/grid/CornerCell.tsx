@@ -24,14 +24,16 @@ export const CornerCell: React.FC<CornerCellProps> = memo(({ className = '' }) =
       }}
     >
       <button
-        className="w-full h-full bg-gray-50 border-r border-b border-gray-300 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-1 focus:ring-inset focus:ring-blue-500"
+        className="w-full h-full border-r border-b transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset"
+        style={{ borderColor: 'var(--color-grid-header-border)' }}
         onClick={onSelectAll}
         title="Select all cells"
         aria-label="Select all cells"
       >
-        {/* Optional: Add a small triangle indicator */}
+        {/* Small triangle indicator */}
         <svg
-          className="w-2 h-2 text-gray-400 absolute bottom-1 right-1"
+          className="w-2 h-2 absolute bottom-1 right-1"
+          style={{ color: 'var(--color-text-muted)' }}
           viewBox="0 0 8 8"
           fill="currentColor"
         >

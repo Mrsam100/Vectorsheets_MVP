@@ -1,0 +1,39 @@
+/**
+ * Density Mode Tokens — VectorSheet layout density
+ *
+ * "default" density uses values from tokens-light.css (no override needed).
+ * Compact: tighter spacing for power users / high-DPI screens.
+ * Cozy: more breathing room for touch devices / presentations.
+ *
+ * Only sizing and typography tokens change — colors are unaffected.
+ */
+
+/* Compact — tighter spacing for power users */
+[data-vs-density="compact"] {
+  --topbar-height: 34px;
+  --formula-bar-height: 24px;
+  --statusbar-height: 20px;
+  --col-header-height: 20px;
+  --default-cell-height: 20px;
+  --ribbon-height: 30px;
+  --ribbon-btn-size: 24px;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-lg: 13px;
+}
+
+/* Cozy — more breathing room for touch / presentations */
+[data-vs-density="cozy"] {
+  --topbar-height: 48px;
+  --formula-bar-height: 34px;
+  --statusbar-height: 28px;
+  --col-header-height: 28px;
+  --default-cell-height: 30px;
+  --ribbon-height: 44px;
+  --ribbon-btn-size: 34px;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+}

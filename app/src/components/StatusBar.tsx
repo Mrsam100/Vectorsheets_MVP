@@ -6,16 +6,16 @@
  * - Edit mode indicator
  * - Quick stats (sum, average, count for selection)
  * - Zoom control
- * - Sheet tabs (placeholder)
+ * - Sheet tabs (via SheetTabs component)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
+import { SheetTabs, type SheetTabInfo } from './SheetTabs';
 
 export interface StatusBarProps {
   /** Optional class name */
   className?: string;
-  /** Current cell address */
-  cellAddress?: string;
+
   /** Edit mode: 'ready' | 'edit' | 'enter' */
   mode?: 'ready' | 'edit' | 'enter';
   /** Selection statistics */
@@ -30,62 +30,106 @@ export interface StatusBarProps {
   zoom?: number;
   /** Zoom change handler */
   onZoomChange?: (zoom: number) => void;
+  /** Sheet tab data */
+  sheets?: ReadonlyArray<SheetTabInfo>;
+  /** Activate a sheet */
+  onActivateSheet?: (id: string) => void;
+  /** Add a new sheet */
+  onAddSheet?: () => void;
+  /** Rename a sheet */
+  onRenameSheet?: (id: string, newName: string) => void;
+  /** Delete a sheet */
+  onDeleteSheet?: (id: string) => void;
+  /** Reorder a sheet */
+  onReorderSheet?: (id: string, newIndex: number) => void;
 }
 
 const ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
 
-export const StatusBar: React.FC<StatusBarProps> = ({
+const MODE_LABELS: Record<string, { text: string; color: string }> = {
+  ready: { text: 'Ready', color: 'statusbar-mode-ready' },
+  edit: { text: 'Edit', color: 'statusbar-mode-edit' },
+  enter: { text: 'Enter', color: 'statusbar-mode-enter' },
+};
+
+function formatStatNumber(num: number | undefined): string {
+  if (num === undefined) return '—';
+  if (Number.isInteger(num)) return num.toLocaleString();
+  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+const StatusBarInner: React.FC<StatusBarProps> = ({
   className = '',
-  cellAddress: _cellAddress = 'A1', // Reserved for future use
   mode = 'ready',
   stats,
   zoom = 1,
   onZoomChange,
+  sheets,
+  onActivateSheet,
+  onAddSheet,
+  onRenameSheet,
+  onDeleteSheet,
+  onReorderSheet,
 }) => {
   const [showZoomMenu, setShowZoomMenu] = useState(false);
+  const zoomContainerRef = useRef<HTMLDivElement>(null);
 
-  const modeLabels: Record<string, { text: string; color: string }> = {
-    ready: { text: 'Ready', color: 'text-gray-500' },
-    edit: { text: 'Edit', color: 'text-blue-600' },
-    enter: { text: 'Enter', color: 'text-green-600' },
-  };
-
-  const currentMode = modeLabels[mode] || modeLabels.ready;
-
-  // Format number for display
-  const formatNumber = (num: number | undefined): string => {
-    if (num === undefined) return '—';
-    if (Number.isInteger(num)) return num.toLocaleString();
-    return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  };
+  const currentMode = MODE_LABELS[mode] || MODE_LABELS.ready;
 
   const handleZoomClick = (level: number) => {
     onZoomChange?.(level);
     setShowZoomMenu(false);
   };
 
+  // Dismiss zoom menu on click-outside
+  useEffect(() => {
+    if (!showZoomMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (zoomContainerRef.current && !zoomContainerRef.current.contains(e.target as Node)) {
+        setShowZoomMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [showZoomMenu]);
+
   return (
     <footer
-      className={`statusbar flex items-center h-6 px-2 border-t border-gray-200 bg-gray-50 text-xs ${className}`}
+      className={`statusbar flex items-center h-6 px-2 border-t text-xs ${className}`}
     >
-      {/* Left Section - Sheet Tabs Placeholder */}
-      <div className="flex items-center gap-1 mr-4">
-        <button
-          className="flex items-center gap-1 px-2 py-0.5 bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-          title="Sheet 1"
-        >
-          <span>Sheet1</span>
-        </button>
-        <button
-          className="w-5 h-5 flex items-center justify-center text-gray-500 hover:bg-gray-200 rounded"
-          title="Add sheet"
-        >
-          <PlusIcon className="w-3 h-3" />
-        </button>
+      {/* Left Section - Sheet Tabs */}
+      <div className="flex items-center mr-4" style={{ maxWidth: '40%' }}>
+        {sheets && onActivateSheet && onAddSheet && onRenameSheet && onDeleteSheet && onReorderSheet ? (
+          <SheetTabs
+            sheets={sheets}
+            onActivateSheet={onActivateSheet}
+            onAddSheet={onAddSheet}
+            onRenameSheet={onRenameSheet}
+            onDeleteSheet={onDeleteSheet}
+            onReorderSheet={onReorderSheet}
+          />
+        ) : (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="statusbar-sheet-btn flex items-center gap-1 px-2 py-0.5 rounded"
+              title="Sheet 1"
+            >
+              <span>Sheet1</span>
+            </button>
+            <button
+              type="button"
+              className="statusbar-add-btn w-5 h-5 flex items-center justify-center rounded"
+              title="Add sheet"
+            >
+              <PlusIcon className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Divider */}
-      <div className="w-px h-4 bg-gray-300 mr-3" />
+      <div className="statusbar-divider w-px h-4 mr-3" />
 
       {/* Mode Indicator */}
       <div className="flex items-center gap-2 mr-4">
@@ -97,37 +141,38 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Selection Stats */}
+      {/* Selection Stats (hidden on narrow viewports via CSS) */}
       {stats && (
-        <div className="flex items-center gap-4 mr-4 text-gray-600">
+        <div className="statusbar-stats flex items-center gap-4 mr-4 statusbar-stat-value">
           {stats.sum !== undefined && (
             <div className="flex items-center gap-1">
-              <span className="text-gray-400">Sum:</span>
-              <span className="font-medium">{formatNumber(stats.sum)}</span>
+              <span className="statusbar-stat-label">Sum:</span>
+              <span className="font-medium">{formatStatNumber(stats.sum)}</span>
             </div>
           )}
           {stats.average !== undefined && (
             <div className="flex items-center gap-1">
-              <span className="text-gray-400">Avg:</span>
-              <span className="font-medium">{formatNumber(stats.average)}</span>
+              <span className="statusbar-stat-label">Avg:</span>
+              <span className="font-medium">{formatStatNumber(stats.average)}</span>
             </div>
           )}
           {stats.count !== undefined && (
             <div className="flex items-center gap-1">
-              <span className="text-gray-400">Count:</span>
-              <span className="font-medium">{formatNumber(stats.count)}</span>
+              <span className="statusbar-stat-label">Count:</span>
+              <span className="font-medium">{formatStatNumber(stats.count)}</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Divider */}
-      <div className="w-px h-4 bg-gray-300 mr-3" />
+      {/* Divider (hidden with stats on narrow viewports) */}
+      <div className="statusbar-divider statusbar-stats w-px h-4 mr-3" />
 
       {/* Zoom Control */}
-      <div className="relative flex items-center gap-1">
+      <div className="relative flex items-center gap-1" ref={zoomContainerRef}>
         <button
-          className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-50"
+          type="button"
+          className="statusbar-zoom-btn p-0.5 rounded disabled:opacity-50"
           onClick={() => {
             const idx = ZOOM_LEVELS.findIndex((z) => z >= zoom);
             if (idx > 0) onZoomChange?.(ZOOM_LEVELS[idx - 1]);
@@ -135,11 +180,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           disabled={zoom <= ZOOM_LEVELS[0]}
           title="Zoom out"
         >
-          <MinusIcon className="w-3 h-3 text-gray-500" />
+          <MinusIcon className="w-3 h-3" />
         </button>
 
         <button
-          className="w-14 text-center text-gray-600 hover:bg-gray-200 rounded px-1 py-0.5"
+          type="button"
+          className="statusbar-zoom-text w-14 text-center rounded px-1 py-0.5"
           onClick={() => setShowZoomMenu(!showZoomMenu)}
           title="Zoom level"
         >
@@ -147,7 +193,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </button>
 
         <button
-          className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-50"
+          type="button"
+          className="statusbar-zoom-btn p-0.5 rounded disabled:opacity-50"
           onClick={() => {
             const idx = ZOOM_LEVELS.findIndex((z) => z > zoom);
             if (idx !== -1) onZoomChange?.(ZOOM_LEVELS[idx]);
@@ -155,17 +202,18 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
           title="Zoom in"
         >
-          <PlusIcon className="w-3 h-3 text-gray-500" />
+          <PlusIcon className="w-3 h-3" />
         </button>
 
         {/* Zoom Menu */}
         {showZoomMenu && (
-          <div className="absolute bottom-full right-0 mb-1 w-20 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50">
+          <div className="statusbar-zoom-menu absolute bottom-full right-0 mb-1 w-20 rounded-md py-1 z-50">
             {ZOOM_LEVELS.map((level) => (
               <button
+                type="button"
                 key={level}
-                className={`w-full px-3 py-1 text-left text-xs hover:bg-gray-100 ${
-                  level === zoom ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                className={`statusbar-zoom-option w-full px-3 py-1 text-left text-xs ${
+                  level === zoom ? 'statusbar-zoom-option-active' : ''
                 }`}
                 onClick={() => handleZoomClick(level)}
               >
@@ -192,4 +240,7 @@ const MinusIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+StatusBarInner.displayName = 'StatusBar';
+
+export const StatusBar = memo(StatusBarInner);
 export default StatusBar;

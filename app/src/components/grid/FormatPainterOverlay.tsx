@@ -64,8 +64,8 @@ const SourceHighlight: React.FC<SourceHighlightProps> = memo(
           width,
           height,
           willChange: 'transform',
-          border: `${isPersistent ? 3 : 2}px dashed #16a34a`,
-          backgroundColor: 'rgba(22, 163, 74, 0.06)',
+          border: `${isPersistent ? 3 : 2}px dashed var(--color-format-painter)`,
+          backgroundColor: 'var(--color-format-painter-fill)',
           boxSizing: 'border-box',
           pointerEvents: 'none',
         }}
@@ -113,8 +113,8 @@ const HoverPreview: React.FC<HoverPreviewProps> = memo(
           width,
           height,
           willChange: 'transform',
-          backgroundColor: 'rgba(22, 163, 74, 0.08)',
-          border: '1px solid rgba(22, 163, 74, 0.3)',
+          backgroundColor: 'var(--color-format-painter-hover)',
+          border: '1px solid var(--color-format-painter-border)',
           boxSizing: 'border-box',
           pointerEvents: 'none',
         }}

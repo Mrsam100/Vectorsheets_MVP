@@ -510,6 +510,13 @@ function processEditingIntent(
       return { handled: false, result: {} };
     }
 
+    case 'BeginEdit': {
+      // Single-click on another cell triggers this — confirm current and let
+      // checkStartEditTrigger handle starting the new edit
+      editActions.confirmEdit();
+      return { handled: false, result: {} };
+    }
+
     default:
       return { handled: false, result: {} };
   }
@@ -556,6 +563,23 @@ function checkStartEditTrigger(
       return {
         // No selection change needed
         beginEdit: { row, col, initialValue: startIntent.initialValue },
+      };
+    }
+
+    case 'BeginEdit': {
+      // Single-click triggered edit — start in Edit mode with existing value
+      const row = (intent as { row: number }).row;
+      const col = (intent as { col: number }).col;
+      const cellValue = getCellValue(row, col);
+
+      editActions.startEditing(
+        { row, col },
+        cellValue,
+        false // don't replaceContent — show existing value with cursor
+      );
+
+      return {
+        beginEdit: { row, col },
       };
     }
 

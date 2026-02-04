@@ -1,0 +1,209 @@
+/**
+ * Light Theme Tokens — default theme for VectorSheet
+ *
+ * These tokens are the canonical design values. Dark and high-contrast
+ * themes override the same variable names via attribute selectors.
+ *
+ * Naming: --color-{category}-{variant}
+ *   category: bg, text, border, accent, grid, header, btn, selection,
+ *             fill-handle, freeze, danger, warning, success, dialog, focus
+ */
+
+:root,
+[data-vs-theme="light"] {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------------------
+     Surface
+     --------------------------------------------------------------------------- */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-tertiary: #f1f5f9;
+  --color-bg-hover: #e2e8f0;
+  --color-bg-surface: #ffffff;
+
+  /* ---------------------------------------------------------------------------
+     Text
+     --------------------------------------------------------------------------- */
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
+  --color-text-on-accent: #ffffff;
+
+  /* ---------------------------------------------------------------------------
+     Border
+     --------------------------------------------------------------------------- */
+  --color-border-primary: #e2e8f0;
+  --color-border-secondary: #cbd5e1;
+  --color-border-focus: #1a73e8;
+
+  /* ---------------------------------------------------------------------------
+     Accent
+     --------------------------------------------------------------------------- */
+  --color-accent: #1a73e8;
+  --color-accent-hover: #1557b0;
+  --color-accent-light: rgba(26, 115, 232, 0.1);
+
+  /* ---------------------------------------------------------------------------
+     Grid
+     --------------------------------------------------------------------------- */
+  --color-grid-line: #e2e8f0;
+  --color-grid-header-bg: #f8fafc;
+  --color-grid-header-border: #cbd5e1;
+  --color-grid-cell-bg: #ffffff;
+  --color-grid-cell-selected: rgba(26, 115, 232, 0.08);
+  --color-grid-selection-border: #1a73e8;
+
+  /* ---------------------------------------------------------------------------
+     Header States
+     --------------------------------------------------------------------------- */
+  --color-header-hover: #e8eaed;
+  --color-header-selected-bg: #d3e3fd;
+  --color-header-selected-text: #1967d2;
+  --color-header-selected-border: #aecbfa;
+  --color-header-gradient-light: rgba(255, 255, 255, 0.5);
+  --color-header-gradient-dark: rgba(0, 0, 0, 0.02);
+
+  /* ---------------------------------------------------------------------------
+     Button States (ribbon, toolbar)
+     --------------------------------------------------------------------------- */
+  --color-btn-active-bg: #cdd5de;
+  --color-btn-pressed-bg: #d6e4f0;
+  --color-btn-pressed-border: #b0cfe0;
+  --color-btn-pressed-hover-bg: #c4d8ec;
+  --color-btn-pressed-hover-border: #9abdd4;
+  --color-btn-pressed-active-bg: #b2cce4;
+  --color-btn-pressed-active-border: #89b0c8;
+
+  /* ---------------------------------------------------------------------------
+     Selection Overlay
+     --------------------------------------------------------------------------- */
+  --color-selection-fill: rgba(59, 130, 246, 0.12);
+  --color-selection-border: rgba(59, 130, 246, 0.5);
+  --color-selection-secondary-fill: rgba(59, 130, 246, 0.06);
+  --color-selection-secondary-border: rgba(59, 130, 246, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Fill Handle
+     --------------------------------------------------------------------------- */
+  --color-fill-handle: #2563eb;
+  --color-fill-handle-hover: #1d4ed8;
+  --color-fill-handle-active: #1e40af;
+  --color-fill-handle-border: #ffffff;
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Lines
+     --------------------------------------------------------------------------- */
+  --color-freeze-line: #9aa0a6;
+
+  /* ---------------------------------------------------------------------------
+     Semantic Status Colors
+     --------------------------------------------------------------------------- */
+  --color-danger: #dc2626;
+  --color-danger-light: #fef2f2;
+  --color-danger-border: #fca5a5;
+  --color-danger-border-hover: #f87171;
+  --color-warning: #f59e0b;
+  --color-warning-text: #b45309;
+  --color-warning-bg: #fffbeb;
+  --color-success-bg: #217346;
+  --color-success-bg-hover: #1a5c38;
+  --color-success-bg-active: #154d2f;
+
+  /* ---------------------------------------------------------------------------
+     Dialog / Overlay
+     --------------------------------------------------------------------------- */
+  --color-backdrop: rgba(0, 0, 0, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Focus
+     --------------------------------------------------------------------------- */
+  --color-focus-ring: rgba(26, 115, 232, 0.4);
+  --color-focus-ring-strong: rgba(26, 115, 232, 0.6);
+
+  /* ---------------------------------------------------------------------------
+     Cell
+     --------------------------------------------------------------------------- */
+  --color-cell-hover: rgba(0, 0, 0, 0.02);
+  --color-marching-ants: #2563eb;
+
+  /* ---------------------------------------------------------------------------
+     Swatch / Color Picker
+     --------------------------------------------------------------------------- */
+  --color-swatch-border: rgba(0, 0, 0, 0.12);
+
+  /* ---------------------------------------------------------------------------
+     Active Cell
+     --------------------------------------------------------------------------- */
+  --color-active-cell-inset: rgba(255, 255, 255, 0.5);
+
+  /* ---------------------------------------------------------------------------
+     Warning Focus
+     --------------------------------------------------------------------------- */
+  --color-warning-focus-ring: rgba(245, 158, 11, 0.2);
+
+  /* ---------------------------------------------------------------------------
+     Editor Mode
+     --------------------------------------------------------------------------- */
+  --color-mode-edit: #1a73e8;
+  --color-mode-point: #34a853;
+  --color-mode-enter: #fbbc04;
+  --color-editor-selection: rgba(26, 115, 232, 0.3);
+  --color-editor-point-selection: rgba(52, 168, 83, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Format Painter
+     --------------------------------------------------------------------------- */
+  --color-format-painter: #16a34a;
+  --color-format-painter-fill: rgba(22, 163, 74, 0.06);
+  --color-format-painter-hover: rgba(22, 163, 74, 0.08);
+  --color-format-painter-border: rgba(22, 163, 74, 0.3);
+
+  /* ---------------------------------------------------------------------------
+     Freeze Pane Shadows
+     --------------------------------------------------------------------------- */
+  --shadow-freeze-v: 2px 0 4px rgba(0, 0, 0, 0.15);
+  --shadow-freeze-h: 0 2px 4px rgba(0, 0, 0, 0.15);
+
+  /* ---------------------------------------------------------------------------
+     Shadows
+     --------------------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-dropdown: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-dialog: 0 20px 60px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-context: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-fill-handle: 0 1px 3px rgba(0, 0, 0, 0.25);
+
+  /* ---------------------------------------------------------------------------
+     Sizing (density can override)
+     --------------------------------------------------------------------------- */
+  --topbar-height: 40px;
+  --formula-bar-height: 28px;
+  --statusbar-height: 24px;
+  --row-header-width: 46px;
+  --col-header-height: 24px;
+  --default-cell-width: 100px;
+  --default-cell-height: 24px;
+  --ribbon-height: 36px;
+  --ribbon-btn-size: 28px;
+
+  /* ---------------------------------------------------------------------------
+     Typography
+     --------------------------------------------------------------------------- */
+  --font-family-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  --font-family-cell: Arial, sans-serif;
+  --font-family-mono: Consolas, Monaco, 'Courier New', monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+
+  /* ---------------------------------------------------------------------------
+     Transitions
+     --------------------------------------------------------------------------- */
+  --transition-fast: 100ms ease;
+  --transition-normal: 150ms ease;
+  --transition-slow: 200ms ease;
+}

@@ -52,11 +52,16 @@ export interface RibbonColorPickerProps {
 // Component
 // =============================================================================
 
+const SWATCH_COLS = 10;
+const SWATCH_COUNT = COLOR_PALETTE.length;
+
 export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
   ({ value, onChange, icon, tooltip, disabled = false }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const noColorRef = useRef<HTMLButtonElement>(null);
+    const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
     // Close on click outside or Escape key
     useEffect(() => {
@@ -98,11 +103,10 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
     // Event delegation: one handler for all swatches instead of 50+ closures
     const handleSwatchClick = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
-        const target = e.target as HTMLElement;
-        const color = target.dataset.color;
-        if (color !== undefined) {
-          handleColorSelect(color);
-        }
+        const target = (e.target as HTMLElement).closest('[data-color]') as HTMLElement | null;
+        const color = target?.dataset.color;
+        if (color === undefined) return;
+        handleColorSelect(color);
       },
       [handleColorSelect],
     );
@@ -110,6 +114,66 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
     const toggleOpen = useCallback(() => {
       if (!disabled) setIsOpen((prev) => !prev);
     }, [disabled]);
+
+    // Arrow key navigation for the swatch grid (10 columns)
+    // ArrowUp from first row jumps to the "No Color" button above the grid
+    const handleSwatchKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+      const color = target.dataset.color;
+      if (color === undefined) return;
+
+      const idx = COLOR_PALETTE.indexOf(color);
+      if (idx === -1) return;
+
+      let nextIdx = idx;
+      switch (e.key) {
+        case 'ArrowRight':
+          e.preventDefault();
+          nextIdx = idx + 1 < SWATCH_COUNT ? idx + 1 : idx;
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          nextIdx = idx - 1 >= 0 ? idx - 1 : idx;
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          nextIdx = idx + SWATCH_COLS < SWATCH_COUNT ? idx + SWATCH_COLS : idx;
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          if (idx - SWATCH_COLS >= 0) {
+            nextIdx = idx - SWATCH_COLS;
+          } else {
+            // First row: jump to "No Color" button
+            noColorRef.current?.focus();
+            return;
+          }
+          break;
+        case 'Home':
+          e.preventDefault();
+          nextIdx = 0;
+          break;
+        case 'End':
+          e.preventDefault();
+          nextIdx = SWATCH_COUNT - 1;
+          break;
+        default:
+          return;
+      }
+
+      swatchRefs.current[nextIdx]?.focus();
+    }, []);
+
+    // Focus selected swatch (or first) when dropdown opens
+    useEffect(() => {
+      if (!isOpen) return;
+      const rafId = requestAnimationFrame(() => {
+        const selectedIdx = value ? COLOR_PALETTE.indexOf(value) : 0;
+        const target = swatchRefs.current[selectedIdx >= 0 ? selectedIdx : 0];
+        target?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }, [isOpen, value]);
 
     return (
       <div ref={containerRef} className="relative inline-flex">
@@ -137,27 +201,36 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
         {/* Dropdown panel — single delegated click handler for all swatches */}
         {isOpen && (
           <div
-            className="absolute top-full left-0 mt-1 p-2 bg-white rounded shadow-lg border border-gray-200 z-50"
+            className="absolute top-full left-0 mt-1 p-2 ribbon-color-dropdown z-50"
             role="listbox"
             aria-label={`${tooltip} colors`}
             onClick={handleSwatchClick}
           >
-            {/* Reset / No Color */}
+            {/* Reset / No Color — ArrowDown from here enters the swatch grid */}
             <button
+              ref={noColorRef}
               type="button"
-              className="w-full mb-1.5 px-2 py-1 text-xs text-left text-gray-600 hover:bg-gray-100 rounded border border-transparent hover:border-gray-300 cursor-pointer"
+              className="w-full mb-1.5 px-2 py-1 text-xs text-left ribbon-color-no-color"
               data-color=""
               role="option"
               aria-selected={!value}
               aria-label="No color"
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  const target = value ? COLOR_PALETTE.indexOf(value) : 0;
+                  swatchRefs.current[target >= 0 ? target : 0]?.focus();
+                }
+              }}
             >
               No Color
             </button>
-            <div className="grid gap-0.5" style={GRID_STYLE}>
-              {COLOR_PALETTE.map((color) => (
+            <div className="grid gap-0.5" style={GRID_STYLE} onKeyDown={handleSwatchKeyDown}>
+              {COLOR_PALETTE.map((color, idx) => (
                 <button
                   type="button"
                   key={color}
+                  ref={(el) => { swatchRefs.current[idx] = el; }}
                   className={`ribbon-color-swatch${value === color ? ' ribbon-color-swatch-selected' : ''}`}
                   style={{ backgroundColor: color }}
                   data-color={color}
@@ -165,6 +238,7 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
                   aria-selected={value === color}
                   aria-label={color}
                   title={color}
+                  tabIndex={value === color || (!value && idx === 0) ? 0 : -1}
                 />
               ))}
             </div>
