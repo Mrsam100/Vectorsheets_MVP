@@ -59,9 +59,86 @@ export interface CellBorders {
   left?: CellBorder;
 }
 
+// ============================================================================
+// Rich Text Types (Character-Level Formatting)
+// ============================================================================
+
+/**
+ * Character format (subset of CellFormat for per-character formatting)
+ * Used within FormattedText for character-level styling
+ */
+export interface CharacterFormat {
+  /** Font family */
+  fontFamily?: string;
+  /** Font size in points */
+  fontSize?: number;
+  /** Font color (hex) */
+  fontColor?: string;
+  /** Bold */
+  bold?: boolean;
+  /** Italic */
+  italic?: boolean;
+  /** Underline: 0=none, 1=single, 2=double */
+  underline?: number;
+  /** Strikethrough */
+  strikethrough?: boolean;
+}
+
+/**
+ * Format run - a text range with consistent character formatting
+ * Used to represent character-level formatting within a cell
+ */
+export interface FormatRun {
+  /** Start index in text (inclusive, 0-based) */
+  start: number;
+  /** End index in text (exclusive) */
+  end: number;
+  /** Format for this text range */
+  format?: CharacterFormat;
+}
+
+/**
+ * Rich text value with character-level formatting
+ * Enables Excel-compatible mixed formatting within a single cell
+ * Example: "Good morning" with "Good " (normal) + "morning" (bold)
+ */
+export interface FormattedText {
+  /** Type discriminator for type guards */
+  _type: 'FormattedText';
+  /** Plain text content */
+  text: string;
+  /** Format runs (sorted, non-overlapping character ranges) */
+  runs: FormatRun[];
+}
+
+/**
+ * Type guard for FormattedText
+ */
+export function isFormattedText(value: unknown): value is FormattedText {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '_type' in value &&
+    (value as FormattedText)._type === 'FormattedText'
+  );
+}
+
+/**
+ * Convert Cell.value to plain value (extract text from FormattedText)
+ * Used for operations that don't support rich text (formulas, find/replace, etc.)
+ */
+export function valueToPlainValue(
+  value: string | number | boolean | FormattedText | null
+): string | number | boolean | null {
+  if (isFormattedText(value)) {
+    return value.text;
+  }
+  return value;
+}
+
 export interface Cell {
   /** Raw value (what user entered or formula result) */
-  value: string | number | boolean | null;
+  value: string | number | boolean | FormattedText | null;
   /** Display value (formatted for display) */
   displayValue?: string;
   /** Value type */

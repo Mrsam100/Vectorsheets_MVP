@@ -26,7 +26,7 @@
  * - No side effects: Returns new data, never mutates
  */
 
-import { Cell } from '../types/index.js';
+import { Cell, valueToPlainValue, isFormattedText, type FormattedText } from '../types/index.js';
 
 // =============================================================================
 // Types
@@ -114,7 +114,7 @@ export type PatternType =
  * Source value with metadata.
  */
 export interface SourceValue {
-  /** Raw cell value */
+  /** Raw cell value (plain text if FormattedText) */
   value: string | number | boolean | null;
   /** Cell type */
   type: Cell['type'];
@@ -122,6 +122,8 @@ export interface SourceValue {
   formula?: string;
   /** Original cell format */
   format?: Cell['format'];
+  /** Original FormattedText value (if cell had rich text) */
+  richTextValue?: import('../types/index.js').FormattedText;
   /** Position in source (0-indexed) */
   index: number;
 }
@@ -168,6 +170,8 @@ export interface GeneratedValue {
   formula?: string;
   /** Format to apply (copied from source) */
   format?: Cell['format'];
+  /** FormattedText value (if source had rich text, deep cloned) */
+  richTextValue?: import('../types/index.js').FormattedText;
   /** Index in fill sequence (0-indexed) */
   index: number;
   /** Source value index this was derived from */
@@ -217,6 +221,26 @@ export class FillSeries {
       ...MONTH_NAMES.map(list => [...list]),
       ...QUARTER_NAMES.map(list => [...list]),
     ];
+  }
+
+  // ===========================================================================
+  // FormattedText Support
+  // ===========================================================================
+
+  /**
+   * Deep clone FormattedText to prevent mutation bugs during fill operations.
+   * Creates a new object with cloned runs array and format objects.
+   */
+  private deepCloneFormattedText(ft: FormattedText): FormattedText {
+    return {
+      _type: 'FormattedText',
+      text: ft.text,
+      runs: ft.runs.map(run => ({
+        start: run.start,
+        end: run.end,
+        format: run.format ? { ...run.format } : undefined,
+      })),
+    };
   }
 
   // ===========================================================================
@@ -300,14 +324,19 @@ export class FillSeries {
    * ```
    */
   analyze(sourceCells: (Cell | null)[]): DetectedPattern {
-    // Convert to source values
-    const sourceValues: SourceValue[] = sourceCells.map((cell, index) => ({
-      value: cell?.value ?? null,
-      type: cell?.type ?? 'empty',
-      formula: cell?.formula,
-      format: cell?.format,
-      index,
-    }));
+    // Convert to source values (extract plain text from FormattedText for pattern detection)
+    const sourceValues: SourceValue[] = sourceCells.map((cell, index) => {
+      const cellValue = cell?.value ?? null;
+      return {
+        value: valueToPlainValue(cellValue),
+        type: cell?.type ?? 'empty',
+        formula: cell?.formula,
+        format: cell?.format,
+        // Preserve original FormattedText for copy operations
+        richTextValue: isFormattedText(cellValue) ? cellValue : undefined,
+        index,
+      };
+    });
 
     // Create base pattern
     const basePattern: DetectedPattern = {
@@ -576,6 +605,8 @@ export class FillSeries {
       value: source.value,
       type: source.type,
       format: source.format,
+      // Deep clone FormattedText to prevent mutation
+      richTextValue: source.richTextValue ? this.deepCloneFormattedText(source.richTextValue) : undefined,
       index: absoluteIndex,
       sourceIndex,
       rowOffset,

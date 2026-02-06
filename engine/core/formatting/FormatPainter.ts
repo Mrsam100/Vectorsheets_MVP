@@ -35,6 +35,7 @@ import {
   CellFormat,
   CellBorders,
   CellBorder,
+  type FormatRun,
 } from '../types/index.js';
 
 // =============================================================================
@@ -58,6 +59,8 @@ export interface StoredFormat {
   format: CellFormat | undefined;
   /** The cell borders (deep cloned) */
   borders: CellBorders | undefined;
+  /** Character-level format runs (deep cloned, Excel-compatible) */
+  characterFormats: FormatRun[] | null;
 }
 
 /**
@@ -135,6 +138,8 @@ export interface FormatReader {
   getFormat(row: number, col: number): CellFormat | undefined;
   /** Get borders for a cell */
   getBorders(row: number, col: number): CellBorders | undefined;
+  /** Get character-level format runs for a cell (optional, Excel-compatible) */
+  getCharacterFormats?(row: number, col: number): FormatRun[] | null;
 }
 
 /**
@@ -145,6 +150,8 @@ export interface FormatWriter {
   setFormat(row: number, col: number, format: CellFormat | undefined): void;
   /** Set borders for a cell */
   setBorders(row: number, col: number, borders: CellBorders | undefined): void;
+  /** Set character-level format runs for a cell (optional, Excel-compatible) */
+  setCharacterFormats?(row: number, col: number, runs: FormatRun[] | null): void;
 }
 
 // =============================================================================
@@ -155,6 +162,7 @@ export interface FormatWriter {
 export interface CopiedFormat {
   format: CellFormat | undefined;
   borders: CellBorders | undefined;
+  characterFormats?: FormatRun[] | null;
   timestamp: number;
 }
 
@@ -252,6 +260,7 @@ export class FormatPainter {
     return {
       format: first.format ? this.cloneFormat(first.format) : undefined,
       borders: first.borders ? this.cloneBorders(first.borders) : undefined,
+      characterFormats: this.cloneCharacterFormats(first.characterFormats),
       timestamp: this.pickTimestamp,
     };
   }
@@ -309,18 +318,21 @@ export class FormatPainter {
       for (let col = normalized.startCol; col <= normalized.endCol; col++) {
         const format = reader.getFormat(row, col);
         const borders = reader.getBorders(row, col);
+        const characterFormats = reader.getCharacterFormats?.(row, col) ?? null;
 
         // Apply filters and deep clone
         const filteredFormat = this.filterFormat(format);
         const filteredBorders = this.shouldIncludeBorders()
           ? this.cloneBorders(borders)
           : undefined;
+        const clonedCharacterFormats = this.cloneCharacterFormats(characterFormats);
 
         this.formats.push({
           rowOffset: row - normalized.startRow,
           colOffset: col - normalized.startCol,
           format: filteredFormat,
           borders: filteredBorders,
+          characterFormats: clonedCharacterFormats,
         });
       }
     }
@@ -401,6 +413,15 @@ export class FormatPainter {
           // Apply borders (deep clone)
           if (this.shouldIncludeBorders()) {
             writer.setBorders(row, col, this.cloneBorders(storedFormat.borders));
+          }
+
+          // Apply character-level formats (deep clone, Excel-compatible)
+          if (writer.setCharacterFormats && storedFormat.characterFormats) {
+            writer.setCharacterFormats(
+              row,
+              col,
+              this.cloneCharacterFormats(storedFormat.characterFormats)
+            );
           }
 
           modifiedCells.push({ row, col });
@@ -683,6 +704,20 @@ export class FormatPainter {
   }
 
   /**
+   * Deep clone character-level format runs (Excel-compatible).
+   * Prevents mutation bugs when applying format painter.
+   */
+  private cloneCharacterFormats(runs: FormatRun[] | null): FormatRun[] | null {
+    if (!runs) return null;
+
+    return runs.map(run => ({
+      start: run.start,
+      end: run.end,
+      format: run.format ? { ...run.format } : undefined,
+    }));
+  }
+
+  /**
    * Deep clone a StoredFormat.
    */
   private cloneStoredFormat(stored: StoredFormat): StoredFormat {
@@ -691,6 +726,7 @@ export class FormatPainter {
       colOffset: stored.colOffset,
       format: this.cloneFormat(stored.format),
       borders: this.cloneBorders(stored.borders),
+      characterFormats: this.cloneCharacterFormats(stored.characterFormats),
     };
   }
 

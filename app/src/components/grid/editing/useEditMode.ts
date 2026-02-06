@@ -34,6 +34,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { EditModeManager } from '../../../../../engine/core/editing/EditModeManager';
 import type { EditState } from '../../../../../engine/core/editing/EditModeManager';
+import { isFormattedText } from '../../../../../engine/core/types/index';
 import type { CellRef, EditMode } from '../../../../../engine/core/types/index';
 
 // =============================================================================
@@ -226,7 +227,17 @@ export function useEditMode(options: UseEditModeOptions = {}): UseEditModeReturn
     startEditing: (cell, initialValue, replaceContent = false, initialChar) => {
       manager.startEditing(cell, initialValue, replaceContent ? 'enter' : 'edit', replaceContent, initialChar);
     },
-    confirmEdit: () => manager.confirmEditing(),
+    confirmEdit: () => {
+      const result = manager.confirmEditing();
+      if (!result) return null;
+
+      // Extract plain text from FormattedText for UI layer
+      const plainValue = isFormattedText(result.value)
+        ? result.value.text
+        : result.value;
+
+      return { value: plainValue, cell: result.cell };
+    },
     cancelEdit: () => manager.cancelEditing(),
     setValue: (value) => manager.setValue(value),
     insertText: (text) => manager.insertText(text),
@@ -251,14 +262,20 @@ export function useEditMode(options: UseEditModeOptions = {}): UseEditModeReturn
 
 function createStateFromManager(manager: EditModeManager): EditModeState {
   const engineState = manager.getState();
+
+  // Extract plain text from FormattedText for UI layer
+  const plainValue = isFormattedText(engineState.currentValue)
+    ? engineState.currentValue.text
+    : engineState.currentValue;
+
   return {
     mode: engineState.mode,
     isEditing: engineState.isEditing,
     editingCell: engineState.editingCell,
-    value: engineState.currentValue,
+    value: plainValue,
     cursorPosition: engineState.cursorPosition,
     textSelection: engineState.textSelection,
-    isFormula: engineState.currentValue.startsWith('='),
+    isFormula: plainValue.startsWith('='),
     formulaBarFocused: engineState.formulaBarFocused,
   };
 }

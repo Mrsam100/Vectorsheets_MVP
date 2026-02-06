@@ -33,13 +33,14 @@
  * ┌────────────────────────┬─────────────────────────────────────────────┐
  * │ User Action            │ Emitted Intent                              │
  * ├────────────────────────┼─────────────────────────────────────────────┤
- * │ Click on cell (down)   │ SetActiveCell { row, col }                  │
- * │ Click on cell (up)     │ BeginEdit { row, col }  (single-click edit) │
+ * │ Click on cell          │ SetActiveCell { row, col }                  │
+ * │ Type after click       │ (KeyboardAdapter) StartEdit + char          │
+ * │ F2 after click         │ (KeyboardAdapter) StartEdit (Edit mode)     │
+ * │ Double-click           │ BeginEdit { row, col } (Edit mode)          │
  * │ Shift+Click            │ ExtendSelection { row, col }                │
  * │ Ctrl/Cmd+Click         │ AddRange { row, col }                       │
  * │ Click+Drag (>3px)      │ BeginDragSelection → UpdateDragSelection    │
  * │ Release drag           │ EndDragSelection                            │
- * │ Double-click           │ BeginEdit { row, col }  (redundant/harmless)│
  * │ Click row header       │ SelectRow { row }                           │
  * │ Click col header       │ SelectColumn { col }                        │
  * │ Click corner           │ SelectAll                                   │
@@ -614,17 +615,9 @@ export class PointerAdapter {
           }));
         }
       }
-    } else {
-      // No drag (click) — emit BeginEdit for single-click editing
-      // Only for plain clicks (no Shift/Ctrl modifiers, which are selection actions)
-      if (e.type !== 'pointercancel' && !this.state.isExtending && !this.state.isAdditive && this.state.dragStartCell) {
-        this.emit(createIntent<BeginEditIntent>({
-          type: 'BeginEdit',
-          row: this.state.dragStartCell.row,
-          col: this.state.dragStartCell.col,
-        }));
-      }
     }
+    // Note: Single-click no longer triggers BeginEdit (Excel behavior)
+    // User must type (Enter mode) or press F2 (Edit mode) to start editing
 
     // Stop auto-scroll
     this.stopAutoScroll();
@@ -696,7 +689,6 @@ export class PointerAdapter {
 
     this.state.isDragging = true;
     this.state.dragStartCell = anchorCell;
-    this.state.lastDragCell = anchorCell;
     this.state.lastDragCell = anchorCell;
     this.state.isFillDrag = true;
     this.state.isPointerDown = true; // Fix: Ensure pointer is marked down

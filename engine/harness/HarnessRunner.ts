@@ -39,7 +39,7 @@ import {
   createFormatReaderFromDataStore,
   createFormatWriterFromDataStore,
 } from '../core/formatting/FormatPainter.js';
-import { CellRange, CellFormat, Cell } from '../core/types/index.js';
+import { CellRange, CellFormat, Cell, valueToPlainValue } from '../core/types/index.js';
 import {
   TimeoutErrorOutput,
   StepLimitErrorOutput,
@@ -445,7 +445,8 @@ export class HarnessRunner {
       const rowValues: (string | number | boolean | null)[] = [];
       for (let col = range.startCol; col <= range.endCol; col++) {
         const cell = this.dataStore.getCell(row, col);
-        rowValues.push(cell?.value ?? null);
+        // Convert FormattedText to plain value
+        rowValues.push(valueToPlainValue(cell?.value ?? null));
       }
       values.push(rowValues);
     }
@@ -1604,7 +1605,8 @@ export class HarnessRunner {
 
     for (const [key, cell] of cells) {
       snapshot.set(key, {
-        value: cell.value,
+        // Convert FormattedText to plain value for snapshot
+        value: valueToPlainValue(cell.value),
         formula: cell.formula,
         type: cell.type,
         format: cell.format as Record<string, unknown> | undefined,

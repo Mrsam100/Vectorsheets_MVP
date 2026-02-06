@@ -31,6 +31,10 @@ import {
   CellRange,
   CellFormat,
   Selection,
+  valueToPlainValue,
+  FormattedText,
+  CharacterFormat,
+  isFormattedText,
 } from '../types/index.js';
 import { SparseDataStore } from '../data/SparseDataStore.js';
 
@@ -642,6 +646,19 @@ export class ClipboardManager {
       }
     }
 
+    // Guard against empty input (Math.max on empty spread returns -Infinity)
+    if (cells.length === 0) {
+      return {
+        pastedRange: {
+          startRow: targetCell.row,
+          startCol: targetCell.col,
+          endRow: targetCell.row,
+          endCol: targetCell.col,
+        },
+        pastedCells: [],
+      };
+    }
+
     const maxRow = Math.max(...cells.map(c => c.rowOffset));
     const maxCol = Math.max(...cells.map(c => c.colOffset));
 
@@ -677,13 +694,147 @@ export class ClipboardManager {
     return { pastedRange, pastedCells: result.pastedCells };
   }
 
+  /**
+   * Paste from external HTML source (Excel-compatible)
+   * Parses HTML table with character-level formatting support
+   *
+   * Excel HTML format:
+   * <table><tr><td>Plain</td><td><span style="font-weight:bold">Bold</span></td></tr></table>
+   */
+  pasteExternalHtml(
+    html: string,
+    targetCell: CellRef
+  ): { pastedRange: CellRange; pastedCells: CellRef[] } {
+    // Parse HTML table structure
+    const cells: ClipboardCell[] = [];
+
+    // Simple HTML table parser (handles Excel's HTML format)
+    // Excel wraps table data in <table><tr><td>...</td></tr></table>
+    const tableMatch = html.match(/<table[^>]*>([\s\S]*?)<\/table>/i);
+    if (!tableMatch) {
+      // Fallback: treat as plain text
+      return this.pasteExternal(html, targetCell);
+    }
+
+    const tableContent = tableMatch[1];
+    const rowMatches = tableContent.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+
+    let rowIndex = 0;
+    for (const rowMatch of rowMatches) {
+      const rowContent = rowMatch[1];
+      const cellMatches = rowContent.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+
+      let colIndex = 0;
+      for (const cellMatch of cellMatches) {
+        const cellHtml = cellMatch[1];
+
+        // Parse cell content with FormattedText support
+        const value = this.parseHtmlToFormattedText(cellHtml);
+
+        // Determine cell type
+        let type: Cell['type'] = 'string';
+        if (isFormattedText(value)) {
+          type = 'string'; // FormattedText is always string type
+        } else if (typeof value === 'string') {
+          if (value.startsWith('=')) {
+            type = 'formula';
+          } else if (!isNaN(parseFloat(value)) && isFinite(parseFloat(value))) {
+            type = 'number';
+          } else if (value.toUpperCase() === 'TRUE' || value.toUpperCase() === 'FALSE') {
+            type = 'boolean';
+          }
+        }
+
+        cells.push({
+          rowOffset: rowIndex,
+          colOffset: colIndex,
+          cell: {
+            value,
+            type,
+          },
+          originalRef: { row: rowIndex, col: colIndex },
+        });
+
+        colIndex++;
+      }
+
+      rowIndex++;
+    }
+
+    // Handle empty table
+    if (cells.length === 0) {
+      return {
+        pastedRange: {
+          startRow: targetCell.row,
+          startCol: targetCell.col,
+          endRow: targetCell.row,
+          endCol: targetCell.col,
+        },
+        pastedCells: [],
+      };
+    }
+
+    const maxRow = Math.max(...cells.map(c => c.rowOffset));
+    const maxCol = Math.max(...cells.map(c => c.colOffset));
+
+    const sourceRange: CellRange = { startRow: 0, startCol: 0, endRow: maxRow, endCol: maxCol };
+
+    // Temporarily set clipboard data
+    this.clipboardData = {
+      type: 'copy',
+      sourceRanges: [sourceRange],
+      sourceRange,
+      cells,
+      rows: maxRow + 1,
+      cols: maxCol + 1,
+      timestamp: Date.now(),
+      plainText: '', // Not needed for HTML paste
+      html,
+      isMultiRange: false,
+    };
+
+    const result = this.paste(targetCell, { type: 'all' });
+
+    // Clear temporary clipboard data
+    this.clipboardData = null;
+
+    // Return in expected format
+    const pastedRange = result.pastedRanges[0] ?? {
+      startRow: targetCell.row,
+      startCol: targetCell.col,
+      endRow: targetCell.row,
+      endCol: targetCell.col,
+    };
+
+    return { pastedRange, pastedCells: result.pastedCells };
+  }
+
   // ===========================================================================
   // Private Helpers
   // ===========================================================================
 
+  /**
+   * Deep clone a cell, including FormattedText (production-grade)
+   * CRITICAL: FormattedText must be deep-cloned to avoid mutation bugs
+   */
   private deepCloneCell(cell: Cell): Cell {
+    // Deep clone FormattedText value
+    let clonedValue = cell.value;
+    if (isFormattedText(cell.value)) {
+      clonedValue = {
+        _type: 'FormattedText',
+        text: cell.value.text,
+        runs: cell.value.runs.map(run => ({
+          start: run.start,
+          end: run.end,
+          format: run.format ? { ...run.format } : undefined,
+        })),
+      };
+    }
+
     return {
       ...cell,
+      value: clonedValue,
       format: cell.format ? { ...cell.format } : undefined,
       borders: cell.borders ? {
         top: cell.borders.top ? { ...cell.borders.top } : undefined,
@@ -703,7 +854,7 @@ export class ClipboardManager {
     targetRow: number,
     targetCol: number,
     options: PasteOptions,
-    sourceRange: CellRange
+    _sourceRange: CellRange
   ): void {
     let existingCell = this.dataStore.getCell(targetRow, targetCol);
     const newCell: Cell = existingCell ? this.deepCloneCell(existingCell) : {
@@ -714,13 +865,13 @@ export class ClipboardManager {
     // Apply based on paste type
     switch (options.type) {
       case 'all':
-        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, sourceRange, options);
+        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, clipCell.originalRef, options);
         break;
       case 'values':
         this.applyValuesPaste(newCell, clipCell.cell, options);
         break;
       case 'formulas':
-        this.applyFormulasPaste(newCell, clipCell.cell, targetRow, targetCol, sourceRange, options);
+        this.applyFormulasPaste(newCell, clipCell.cell, targetRow, targetCol, clipCell.originalRef, options);
         break;
       case 'formats':
         this.applyFormatsPaste(newCell, clipCell.cell);
@@ -730,10 +881,10 @@ export class ClipboardManager {
         this.applyFormatsPaste(newCell, clipCell.cell);
         break;
       case 'transpose':
-        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, sourceRange, options);
+        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, clipCell.originalRef, options);
         break;
       default:
-        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, sourceRange, options);
+        this.applyAllPaste(newCell, clipCell.cell, targetRow, targetCol, clipCell.originalRef, options);
     }
 
     this.dataStore.setCell(targetRow, targetCol, newCell);
@@ -744,7 +895,7 @@ export class ClipboardManager {
     source: Cell,
     targetRow: number,
     targetCol: number,
-    sourceRange: CellRange,
+    originalRef: CellRef,
     options: PasteOptions
   ): void {
     // Copy everything
@@ -755,17 +906,28 @@ export class ClipboardManager {
     target.comment = source.comment;
     target.hyperlink = source.hyperlink ? { ...source.hyperlink } : undefined;
 
-    // Handle formula adjustment
+    // Handle formula adjustment (delta from original cell to target cell)
     if (source.formula) {
       target.formula = this.adjustFormula(
         source.formula,
-        targetRow - sourceRange.startRow,
-        targetCol - sourceRange.startCol
+        targetRow - originalRef.row,
+        targetCol - originalRef.col
       );
       target.value = target.formula;
       target.isDirty = true;
     } else {
-      target.value = this.applyOperation(target.value, source.value, options.operation);
+      // Apply operation (for 'none', just copy value directly)
+      if (options.operation === 'none') {
+        // Preserve FormattedText when no operation
+        target.value = source.value;
+      } else {
+        // Convert FormattedText to plain value for arithmetic operations
+        target.value = this.applyOperation(
+          valueToPlainValue(target.value),
+          valueToPlainValue(source.value),
+          options.operation
+        );
+      }
       target.formula = undefined;
       target.formulaResult = undefined;
     }
@@ -778,7 +940,12 @@ export class ClipboardManager {
   ): void {
     // Paste formula results or values
     const sourceValue = source.formula !== undefined ? source.formulaResult : source.value;
-    target.value = this.applyOperation(target.value, sourceValue, options.operation);
+    // Convert FormattedText to plain value for arithmetic operations
+    target.value = this.applyOperation(
+      valueToPlainValue(target.value),
+      valueToPlainValue(sourceValue ?? null),
+      options.operation
+    );
     target.type = source.type === 'formula' ?
       (typeof target.value === 'number' ? 'number' :
        typeof target.value === 'boolean' ? 'boolean' : 'string') :
@@ -794,20 +961,25 @@ export class ClipboardManager {
     source: Cell,
     targetRow: number,
     targetCol: number,
-    sourceRange: CellRange,
+    originalRef: CellRef,
     options: PasteOptions
   ): void {
     if (source.formula) {
       target.formula = this.adjustFormula(
         source.formula,
-        targetRow - sourceRange.startRow,
-        targetCol - sourceRange.startCol
+        targetRow - originalRef.row,
+        targetCol - originalRef.col
       );
       target.value = target.formula;
       target.type = 'formula';
       target.isDirty = true;
     } else {
-      target.value = this.applyOperation(target.value, source.value, options.operation);
+      // Convert FormattedText to plain value for arithmetic operations
+      target.value = this.applyOperation(
+        valueToPlainValue(target.value),
+        valueToPlainValue(source.value),
+        options.operation
+      );
       target.type = source.type;
     }
   }
@@ -935,13 +1107,292 @@ export class ClipboardManager {
       const value = clipCell.cell.formula !== undefined
         ? clipCell.cell.formulaResult
         : clipCell.cell.value;
-      rows[clipCell.rowOffset][clipCell.colOffset] = value === null ? '' : String(value);
+      rows[clipCell.rowOffset][clipCell.colOffset] = value === null ? '' : (isFormattedText(value) ? value.text : String(value));
     }
 
     // Join with tabs and newlines
     return rows.map(row => row.join('\t')).join('\n');
   }
 
+  // ===========================================================================
+  // Rich Text HTML Export (Excel-Compatible Character-Level Formatting)
+  // ===========================================================================
+
+  /**
+   * Convert CharacterFormat to inline HTML style string
+   * Excel-compatible format conversion for character-level formatting
+   */
+  private characterFormatToStyle(format: CharacterFormat): string {
+    const styles: string[] = [];
+
+    if (format.bold) styles.push('font-weight:bold');
+    if (format.italic) styles.push('font-style:italic');
+    if (format.underline && format.strikethrough) {
+      styles.push('text-decoration:underline line-through');
+    } else if (format.underline) {
+      styles.push('text-decoration:underline');
+    } else if (format.strikethrough) {
+      styles.push('text-decoration:line-through');
+    }
+    if (format.fontFamily) styles.push(`font-family:${this.escapeHtml(format.fontFamily)}`);
+    if (format.fontSize) styles.push(`font-size:${format.fontSize}pt`);
+    if (format.fontColor) styles.push(`color:${format.fontColor}`);
+
+    return styles.join(';');
+  }
+
+  /**
+   * Convert FormattedText to Excel-compatible HTML with character-level formatting
+   * Each FormatRun becomes a <span> with inline styles
+   *
+   * Example: { text: "Good morning", runs: [{ start: 5, end: 12, format: { bold: true } }] }
+   * → "Good <span style=\"font-weight:bold\">morning</span>"
+   */
+  private formattedTextToHtml(ft: FormattedText, cellFormat?: CellFormat): string {
+    const { text, runs } = ft;
+
+    // Edge case: empty text
+    if (text.length === 0) {
+      return '';
+    }
+
+    // Edge case: no runs, return escaped plain text
+    if (runs.length === 0) {
+      return this.escapeHtml(text);
+    }
+
+    // Build HTML with spans for each run
+    let html = '';
+    let lastEnd = 0;
+
+    for (const run of runs) {
+      // Validate and clamp run bounds
+      const start = Math.max(0, Math.min(run.start, text.length));
+      const end = Math.max(start, Math.min(run.end, text.length));
+
+      // Add unformatted gap before this run (if any)
+      if (start > lastEnd) {
+        const gapText = text.slice(lastEnd, start);
+        // Gap uses cell format (if any)
+        if (cellFormat) {
+          const style = this.cellFormatToStyle(cellFormat);
+          html += style ? `<span style="${style}">${this.escapeHtml(gapText)}</span>` : this.escapeHtml(gapText);
+        } else {
+          html += this.escapeHtml(gapText);
+        }
+      }
+
+      // Add formatted run
+      if (end > start) {
+        const runText = text.slice(start, end);
+
+        if (run.format) {
+          // Merge cell format + character format (character format takes precedence)
+          const mergedStyles: string[] = [];
+
+          // Base: cell format
+          if (cellFormat) {
+            const cellStyle = this.cellFormatToStyle(cellFormat);
+            if (cellStyle) mergedStyles.push(cellStyle);
+          }
+
+          // Override: character format
+          const charStyle = this.characterFormatToStyle(run.format);
+          if (charStyle) mergedStyles.push(charStyle);
+
+          const finalStyle = mergedStyles.join(';');
+          html += `<span style="${finalStyle}">${this.escapeHtml(runText)}</span>`;
+        } else {
+          // No character format, use cell format only
+          if (cellFormat) {
+            const style = this.cellFormatToStyle(cellFormat);
+            html += style ? `<span style="${style}">${this.escapeHtml(runText)}</span>` : this.escapeHtml(runText);
+          } else {
+            html += this.escapeHtml(runText);
+          }
+        }
+      }
+
+      lastEnd = end;
+    }
+
+    // Add trailing unformatted text (if any)
+    if (lastEnd < text.length) {
+      const trailingText = text.slice(lastEnd);
+      if (cellFormat) {
+        const style = this.cellFormatToStyle(cellFormat);
+        html += style ? `<span style="${style}">${this.escapeHtml(trailingText)}</span>` : this.escapeHtml(trailingText);
+      } else {
+        html += this.escapeHtml(trailingText);
+      }
+    }
+
+    return html;
+  }
+
+  // ===========================================================================
+  // Rich Text HTML Import (Excel-Compatible Character-Level Formatting)
+  // ===========================================================================
+
+  /**
+   * Parse CSS style string and extract CharacterFormat
+   * Excel-compatible: extracts bold, italic, underline, color, font, size
+   *
+   * Example: "font-weight:bold;color:#FF0000" → { bold: true, fontColor: "#FF0000" }
+   */
+  private parseStyleToCharacterFormat(styleAttr: string): CharacterFormat | undefined {
+    if (!styleAttr) return undefined;
+
+    const format: CharacterFormat = {};
+    let hasFormat = false;
+
+    // Parse style attribute (e.g., "font-weight:bold; color:red")
+    const styles = styleAttr.split(';').map(s => s.trim()).filter(Boolean);
+
+    for (const style of styles) {
+      const [prop, value] = style.split(':').map(s => s.trim());
+      if (!prop || !value) continue;
+
+      switch (prop.toLowerCase()) {
+        case 'font-weight':
+          if (value === 'bold' || value === '700' || parseInt(value) >= 600) {
+            format.bold = true;
+            hasFormat = true;
+          }
+          break;
+
+        case 'font-style':
+          if (value === 'italic' || value === 'oblique') {
+            format.italic = true;
+            hasFormat = true;
+          }
+          break;
+
+        case 'text-decoration':
+          if (value.includes('underline')) {
+            format.underline = 1;
+            hasFormat = true;
+          }
+          if (value.includes('line-through')) {
+            format.strikethrough = true;
+            hasFormat = true;
+          }
+          break;
+
+        case 'color':
+          format.fontColor = value;
+          hasFormat = true;
+          break;
+
+        case 'font-family':
+          format.fontFamily = value.replace(/['"]/g, ''); // Remove quotes
+          hasFormat = true;
+          break;
+
+        case 'font-size':
+          // Parse font size (e.g., "12pt", "16px")
+          const sizeMatch = value.match(/^(\d+(?:\.\d+)?)(pt|px)?$/);
+          if (sizeMatch) {
+            const size = parseFloat(sizeMatch[1]);
+            // Convert px to pt (1pt = 1.333px)
+            format.fontSize = sizeMatch[2] === 'px' ? Math.round(size / 1.333) : size;
+            hasFormat = true;
+          }
+          break;
+      }
+    }
+
+    return hasFormat ? format : undefined;
+  }
+
+  /**
+   * Parse HTML with character-level formatting to FormattedText
+   * Excel-compatible: handles <span> elements with inline styles
+   *
+   * Example: "Good <span style=\"font-weight:bold\">morning</span>"
+   * → { text: "Good morning", runs: [{ start: 5, end: 12, format: { bold: true } }] }
+   *
+   * PRODUCTION-GRADE: Robust regex-based parser (fixed parser bug)
+   */
+  private parseHtmlToFormattedText(html: string): FormattedText | string {
+    // Quick check: if no span tags, just decode entities and return plain text
+    // This prevents HTML entities like &lt; from being treated as tags
+    if (!html.includes('<span')) {
+      // Decode HTML entities and return plain text
+      return html
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&nbsp;/g, ' ');
+    }
+
+    // Has span tags - decode entities for parsing
+    let decoded = html
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&nbsp;/g, ' ');
+
+    // Remove table/tr/td/th tags but keep content
+    decoded = decoded.replace(/<\/?(?:table|tbody|thead|tr|td|th)[^>]*>/gi, '');
+
+    // Build text and runs using regex-based extraction
+    let text = '';
+    const runs: Array<{ start: number; end: number; format?: CharacterFormat }> = [];
+
+    // Match spans OR plain text between tags
+    // Regex: <span style="...">content</span> OR plain text
+    const tokenRegex = /<span\s+style="([^"]+)">([^<]*)<\/span>|([^<]+)/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = tokenRegex.exec(decoded)) !== null) {
+      if (match[1] !== undefined && match[2] !== undefined) {
+        // Matched: <span style="...">content</span>
+        const styleAttr = match[1];
+        const content = match[2];
+
+        const startPos = text.length;
+        text += content;
+        const endPos = text.length;
+
+        const format = this.parseStyleToCharacterFormat(styleAttr);
+        if (format && endPos > startPos) {
+          runs.push({ start: startPos, end: endPos, format });
+        }
+      } else if (match[3] !== undefined) {
+        // Matched: plain text (no span)
+        text += match[3];
+      }
+    }
+
+    // Fallback: if regex didn't extract anything, strip all HTML tags
+    if (text.length === 0 && decoded.length > 0) {
+      text = decoded.replace(/<[^>]*>/g, '').trim();
+    }
+
+    // If no runs with formatting, return plain text
+    if (runs.length === 0) {
+      return text || '';
+    }
+
+    // Return FormattedText
+    return {
+      _type: 'FormattedText',
+      text,
+      runs,
+    };
+  }
+
+  /**
+   * Convert clipboard cells to Excel-compatible HTML table
+   * Supports character-level formatting via FormattedText
+   */
   private toHtml(cells: ClipboardCell[], range: CellRange): string {
     const numRows = range.endRow - range.startRow + 1;
     const numCols = range.endCol - range.startCol + 1;
@@ -962,11 +1413,25 @@ export class ClipboardManager {
     for (const row of grid) {
       html += '<tr>';
       for (const cell of row) {
+        // Get cell value (formula result or raw value)
         const value = cell?.formula !== undefined
           ? cell.formulaResult
           : cell?.value;
+
+        // Build cell content with character-level formatting support
+        let cellContent: string;
+        if (isFormattedText(value)) {
+          // Rich text: convert FormattedText to HTML with character-level formatting
+          cellContent = this.formattedTextToHtml(value, cell?.format);
+        } else {
+          // Plain text: escape and wrap in cell format (if any)
+          const escapedText = this.escapeHtml(value === null ? '' : String(value));
+          cellContent = escapedText;
+        }
+
+        // Apply cell-level style
         const style = this.cellFormatToStyle(cell?.format);
-        html += `<td${style ? ` style="${style}"` : ''}>${this.escapeHtml(value === null ? '' : String(value))}</td>`;
+        html += `<td${style ? ` style="${style}"` : ''}>${cellContent}</td>`;
       }
       html += '</tr>';
     }

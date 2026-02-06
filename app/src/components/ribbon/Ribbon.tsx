@@ -205,15 +205,16 @@ export const Ribbon: React.FC<RibbonProps> = memo(
       >
         {/* Clipboard Group — priority 1 (always visible) */}
         <RibbonGroup label="Clipboard" priority={1}>
-          <RibbonButton icon={ICON_CUT} tooltip="Cut (Ctrl+X)" onClick={handleCut} disabled={editDisabled || !state.hasSelection} />
-          <RibbonButton icon={ICON_COPY} tooltip="Copy (Ctrl+C)" onClick={handleCopy} disabled={!state.hasSelection} />
-          <RibbonButton icon={ICON_PASTE} tooltip="Paste (Ctrl+V)" onClick={handlePaste} disabled={editDisabled} />
+          <RibbonButton icon={ICON_CUT} tooltip="Cut (Ctrl+X)" onClick={handleCut} disabled={editDisabled || !state.hasSelection} preserveEdit={false} />
+          <RibbonButton icon={ICON_COPY} tooltip="Copy (Ctrl+C)" onClick={handleCopy} disabled={!state.hasSelection} preserveEdit={false} />
+          <RibbonButton icon={ICON_PASTE} tooltip="Paste (Ctrl+V)" onClick={handlePaste} disabled={editDisabled} preserveEdit={false} />
           <RibbonToggleButton
             icon={ICON_FORMAT_PAINTER}
             tooltip="Format Painter"
             pressed={state.formatPainterActive}
             onClick={onFormatPainterToggle ?? NOOP}
             disabled={editDisabled || !state.hasSelection}
+            preserveEdit={true}
           />
         </RibbonGroup>
 
@@ -221,8 +222,8 @@ export const Ribbon: React.FC<RibbonProps> = memo(
 
         {/* History Group — priority 2 (always visible) */}
         <RibbonGroup label="History" priority={2}>
-          <RibbonButton icon={ICON_UNDO} tooltip="Undo (Ctrl+Z)" onClick={handleUndo} disabled={!state.canUndo} />
-          <RibbonButton icon={ICON_REDO} tooltip="Redo (Ctrl+Y)" onClick={handleRedo} disabled={!state.canRedo} />
+          <RibbonButton icon={ICON_UNDO} tooltip="Undo (Ctrl+Z)" onClick={handleUndo} disabled={!state.canUndo} preserveEdit={false} />
+          <RibbonButton icon={ICON_REDO} tooltip="Redo (Ctrl+Y)" onClick={handleRedo} disabled={!state.canRedo} preserveEdit={false} />
         </RibbonGroup>
 
         <RibbonSeparator beforePriority={3} />
@@ -239,6 +240,7 @@ export const Ribbon: React.FC<RibbonProps> = memo(
               ariaLabel="Font family"
               width={120}
               disabled={editDisabled}
+              preserveEdit={true}
             />
             <RibbonDropdown
               value={fmt.fontSize ?? 11}
@@ -248,15 +250,16 @@ export const Ribbon: React.FC<RibbonProps> = memo(
               ariaLabel="Font size"
               width={52}
               disabled={editDisabled}
+              preserveEdit={true}
             />
           </span>
-          <RibbonToggleButton icon={ICON_BOLD} tooltip="Bold (Ctrl+B)" pressed={!!fmt.bold} onClick={handleBold} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_ITALIC} tooltip="Italic (Ctrl+I)" pressed={!!fmt.italic} onClick={handleItalic} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_UNDERLINE} tooltip="Underline (Ctrl+U)" pressed={!!fmt.underline} onClick={handleUnderline} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_STRIKETHROUGH} tooltip="Strikethrough" pressed={!!fmt.strikethrough} onClick={handleStrikethrough} disabled={editDisabled} />
+          <RibbonToggleButton icon={ICON_BOLD} tooltip="Bold (Ctrl+B)" pressed={!!fmt.bold} onClick={handleBold} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_ITALIC} tooltip="Italic (Ctrl+I)" pressed={!!fmt.italic} onClick={handleItalic} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_UNDERLINE} tooltip="Underline (Ctrl+U)" pressed={!!fmt.underline} onClick={handleUnderline} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_STRIKETHROUGH} tooltip="Strikethrough" pressed={!!fmt.strikethrough} onClick={handleStrikethrough} disabled={editDisabled} preserveEdit={true} />
           <span className="ribbon-font-extras">
-            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} />
-            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} />
+            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} preserveEdit={true} />
+            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} preserveEdit={true} />
           </span>
         </RibbonGroup>
 
@@ -264,10 +267,10 @@ export const Ribbon: React.FC<RibbonProps> = memo(
 
         {/* Alignment Group — priority 4 (overflows at medium) */}
         <RibbonGroup label="Alignment" priority={4}>
-          <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} />
-          <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} />
+          <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} preserveEdit={true} />
+          <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} preserveEdit={true} />
         </RibbonGroup>
 
         <RibbonSeparator beforePriority={5} />
@@ -282,6 +285,7 @@ export const Ribbon: React.FC<RibbonProps> = memo(
             ariaLabel="Number format"
             width={100}
             disabled={editDisabled}
+            preserveEdit={true}
           />
         </RibbonGroup>
 
@@ -297,6 +301,7 @@ export const Ribbon: React.FC<RibbonProps> = memo(
               ariaLabel="Font family"
               width={120}
               disabled={editDisabled}
+              preserveEdit={true}
             />
             <RibbonDropdown
               value={fmt.fontSize ?? 11}
@@ -306,17 +311,18 @@ export const Ribbon: React.FC<RibbonProps> = memo(
               ariaLabel="Font size"
               width={52}
               disabled={editDisabled}
+              preserveEdit={true}
             />
-            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} />
-            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} />
+            <RibbonColorPicker icon={ICON_FONT_COLOR} value={fmt.fontColor} onChange={handleFontColor} tooltip="Font Color" disabled={editDisabled} preserveEdit={true} />
+            <RibbonColorPicker icon={ICON_BG_COLOR} value={fmt.backgroundColor} onChange={handleBgColor} tooltip="Background Color" disabled={editDisabled} preserveEdit={true} />
           </RibbonGroup>
           <RibbonSeparator />
           {/* Alignment */}
           <RibbonGroup label="Alignment">
-            <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} />
-            <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} />
-            <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} />
-            <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} />
+            <RibbonToggleButton icon={ICON_ALIGN_LEFT} tooltip="Align Left" pressed={fmt.horizontalAlign === 'left'} onClick={handleAlignLeft} disabled={editDisabled} preserveEdit={true} />
+            <RibbonToggleButton icon={ICON_ALIGN_CENTER} tooltip="Align Center" pressed={fmt.horizontalAlign === 'center'} onClick={handleAlignCenter} disabled={editDisabled} preserveEdit={true} />
+            <RibbonToggleButton icon={ICON_ALIGN_RIGHT} tooltip="Align Right" pressed={fmt.horizontalAlign === 'right'} onClick={handleAlignRight} disabled={editDisabled} preserveEdit={true} />
+            <RibbonToggleButton icon={ICON_WRAP_TEXT} tooltip="Wrap Text" pressed={!!fmt.wrap} onClick={handleWrapText} disabled={editDisabled} preserveEdit={true} />
           </RibbonGroup>
           <RibbonSeparator />
           {/* Number */}
@@ -329,6 +335,7 @@ export const Ribbon: React.FC<RibbonProps> = memo(
               ariaLabel="Number format"
               width={100}
               disabled={editDisabled}
+              preserveEdit={true}
             />
           </RibbonGroup>
         </RibbonOverflowMenu>

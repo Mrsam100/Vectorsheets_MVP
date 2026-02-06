@@ -136,6 +136,8 @@ function useEditHistory(initialValue: string, enabled: boolean) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const lastValueRef = useRef(initialValue);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Capture initial value at edit start (ref avoids resetting on every keystroke)
+  const initialValueRef = useRef(initialValue);
 
   // Use refs to avoid stale closures in callbacks
   const historyRef = useRef(history);
@@ -143,17 +145,19 @@ function useEditHistory(initialValue: string, enabled: boolean) {
   historyRef.current = history;
   historyIndexRef.current = historyIndex;
 
-  // Reset history when editing starts
+  // Reset history only when editing starts/stops (NOT on every value change)
   useEffect(() => {
     if (enabled) {
+      // Capture initial value at the moment editing starts
+      const startValue = initialValueRef.current;
       const initialEntry = {
-        value: initialValue,
-        cursorPosition: initialValue.length,
+        value: startValue,
+        cursorPosition: startValue.length,
         selection: null,
       };
       setHistory([initialEntry]);
       setHistoryIndex(0);
-      lastValueRef.current = initialValue;
+      lastValueRef.current = startValue;
       historyRef.current = [initialEntry];
       historyIndexRef.current = 0;
     }
@@ -163,7 +167,12 @@ function useEditHistory(initialValue: string, enabled: boolean) {
         debounceTimerRef.current = null;
       }
     };
-  }, [enabled, initialValue]);
+  }, [enabled]); // Removed initialValue from deps — only reset on edit start/stop
+
+  // Keep the ref updated for when the next edit session starts
+  if (!enabled) {
+    initialValueRef.current = initialValue;
+  }
 
   const pushHistory = useCallback((entry: EditHistoryEntry) => {
     if (!enabled) return;
@@ -537,20 +546,24 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
       case 'Enter':
         e.preventDefault();
         if (!hasCommittedRef.current) {
-          hasCommittedRef.current = true;
-          actions.confirmEdit();
-          onEnter?.(e.shiftKey);
-          onClose?.();
+          const enterResult = actions.confirmEdit();
+          if (enterResult) {
+            hasCommittedRef.current = true;
+            onEnter?.(e.shiftKey);
+            onClose?.();
+          }
         }
         break;
 
       case 'Tab':
         e.preventDefault();
         if (!hasCommittedRef.current) {
-          hasCommittedRef.current = true;
-          actions.confirmEdit();
-          onTab?.(e.shiftKey);
-          onClose?.();
+          const tabResult = actions.confirmEdit();
+          if (tabResult) {
+            hasCommittedRef.current = true;
+            onTab?.(e.shiftKey);
+            onClose?.();
+          }
         }
         break;
 
@@ -735,7 +748,16 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     if (isComposingRef.current) return;
 
     const relatedTarget = e.relatedTarget as HTMLElement | null;
+
+    // Check if blur is due to clicking an element that preserves edit
     if (relatedTarget?.dataset?.editComponent || relatedTarget?.dataset?.cellEditor) {
+      return;
+    }
+
+    // NEW: Check if clicking a toolbar button or dropdown that preserves edit
+    const preserveEditElement = relatedTarget?.closest('[data-preserve-edit]');
+    if (preserveEditElement) {
+      // Toolbar/formatting button clicked - preserve edit session
       return;
     }
 
@@ -744,6 +766,13 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
       if (isComposingRef.current) return;
       // Guard against double-commit (Enter/Tab/Escape may have already committed)
       if (hasCommittedRef.current) return;
+
+      // Check if focus moved to a preserve-edit element
+      const activePreserveEdit = document.activeElement?.closest('[data-preserve-edit]');
+      if (activePreserveEdit) {
+        return;
+      }
+
       if (!document.activeElement?.closest('[data-edit-component]') &&
           !document.activeElement?.closest('[data-cell-editor]')) {
         hasCommittedRef.current = true;

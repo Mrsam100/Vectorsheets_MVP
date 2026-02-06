@@ -58,6 +58,7 @@ import type {
   RenderCell as EngineRenderCell,
   CellFormat,
 } from '../../../engine/core/types/index';
+import { isFormattedText } from '../../../engine/core/types/index';
 import {
   GridProvider,
   CornerCell,
@@ -270,6 +271,19 @@ function adaptRenderCell(
     };
   }
 
+  // Extract FormattedText for character-level rendering
+  const richText = cell && isFormattedText(cell.value)
+    ? {
+        _type: 'FormattedText' as const,
+        text: cell.value.text,
+        runs: cell.value.runs.map(run => ({
+          start: run.start,
+          end: run.end,
+          format: run.format ? { ...run.format } : undefined,
+        })),
+      }
+    : undefined;
+
   return {
     row: engineCell.row,
     col: engineCell.col,
@@ -277,7 +291,8 @@ function adaptRenderCell(
     y: engineCell.y,
     width: engineCell.width,
     height: engineCell.height,
-    displayValue: cell?.displayValue ?? (cell?.value != null ? String(cell.value) : ''),
+    displayValue: cell?.displayValue ?? (cell && isFormattedText(cell.value) ? cell.value.text : (cell?.value != null ? String(cell.value) : '')),
+    richText, // NEW: Pass FormattedText for multi-span rendering
     valueType,
     isFormula: cell?.formula !== undefined,
     errorCode: cell?.type === 'error' ? String(cell.value) : undefined,
@@ -386,6 +401,11 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
     // Ref for conditional format provider — avoids effect dep on potentially unstable callback
     const cfProviderRef = useRef(conditionalFormatProvider);
     cfProviderRef.current = conditionalFormatProvider;
+    // Refs for frozen pane counts — avoids stale closures in handleScroll and autoScroll
+    const frozenRowsRef = useRef(frozenRows);
+    frozenRowsRef.current = frozenRows;
+    const frozenColsRef = useRef(frozenCols);
+    frozenColsRef.current = frozenCols;
     // Refs for format painter — avoids onIntent dep on potentially unstable callback/state
     const formatPainterStateRef = useRef(formatPainterState);
     formatPainterStateRef.current = formatPainterState;
@@ -587,7 +607,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
           renderer.setScroll(newScroll.scrollLeft, newScroll.scrollTop);
           const engineFrame = renderer.getRenderFrame();
           setScroll(newScroll);
-          setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRows, frozenCols));
+          setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRowsRef.current, frozenColsRef.current));
         } else {
           setScroll(newScroll);
         }
@@ -953,16 +973,22 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
     // Zoom Controls
     // =========================================================================
 
+    // Ref for onZoomChange to avoid stale closures in callbacks
+    const onZoomChangeRef = useRef(onZoomChange);
+    onZoomChangeRef.current = onZoomChange;
+
     const setZoom = useCallback((newZoom: number) => {
       const clamped = roundZoom(clampZoom(newZoom));
       setZoomState((prev) => {
-        if (prev !== clamped) {
-          onZoomChange?.(clamped);
-          return clamped;
-        }
+        if (prev !== clamped) return clamped;
         return prev;
       });
-    }, [onZoomChange]);
+    }, []);
+
+    // Fire onZoomChange outside state updater to avoid side effects in updater
+    useEffect(() => {
+      onZoomChangeRef.current?.(zoom);
+    }, [zoom]);
 
     const getZoom = useCallback(() => zoom, [zoom]);
 
@@ -970,24 +996,16 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
     const zoomIn = useCallback((step = ZOOM_STEP) => {
       setZoomState((prev) => {
         const clamped = roundZoom(clampZoom(prev + step));
-        if (clamped !== prev) {
-          onZoomChange?.(clamped);
-          return clamped;
-        }
-        return prev;
+        return clamped !== prev ? clamped : prev;
       });
-    }, [onZoomChange]);
+    }, []);
 
     const zoomOut = useCallback((step = ZOOM_STEP) => {
       setZoomState((prev) => {
         const clamped = roundZoom(clampZoom(prev - step));
-        if (clamped !== prev) {
-          onZoomChange?.(clamped);
-          return clamped;
-        }
-        return prev;
+        return clamped !== prev ? clamped : prev;
       });
-    }, [onZoomChange]);
+    }, []);
 
     const resetZoom = useCallback(() => setZoom(1.0), [setZoom]);
 
@@ -1046,7 +1064,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
         renderer.setScroll(newScrollLeft, newScrollTop);
         const engineFrame = renderer.getRenderFrame();
         setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
-        setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRows, frozenCols));
+        setFrame(adaptRenderFrame(engineFrame, zoomRef.current, cfProviderRef.current, frozenRowsRef.current, frozenColsRef.current));
       } else {
         setScroll({ scrollLeft: newScrollLeft, scrollTop: newScrollTop });
       }

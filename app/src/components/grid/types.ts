@@ -125,6 +125,38 @@ export interface ValidationStatus {
 }
 
 /**
+ * Character format for rich text (re-exported from engine for UI layer)
+ * Subset of CellFormat for per-character formatting
+ */
+export interface CharacterFormat {
+  fontFamily?: string;
+  fontSize?: number;
+  fontColor?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: number;
+  strikethrough?: boolean;
+}
+
+/**
+ * Format run - text range with consistent character formatting
+ */
+export interface FormatRun {
+  start: number;
+  end: number;
+  format?: CharacterFormat;
+}
+
+/**
+ * Rich text value with character-level formatting (Excel-compatible)
+ */
+export interface FormattedText {
+  _type: 'FormattedText';
+  text: string;
+  runs: FormatRun[];
+}
+
+/**
  * RenderCell - Complete render instructions for a single cell
  *
  * This is the primary data structure the UI receives.
@@ -148,6 +180,8 @@ export interface RenderCell {
   // === Content ===
   /** Pre-formatted display value (already formatted by engine) */
   displayValue: string;
+  /** Rich text value (for character-level formatting) - takes precedence over displayValue */
+  richText?: FormattedText;
   /** Raw value type hint for UI (for cursor positioning, etc.) */
   valueType: 'string' | 'number' | 'boolean' | 'error' | 'empty';
   /** Is this a formula cell? (for formula bar display) */

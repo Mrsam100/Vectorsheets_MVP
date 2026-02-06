@@ -15,6 +15,7 @@ import {
   isFormulaError,
   cellKey,
   parseKey,
+  valueToPlainValue,
 } from '../types/index.js';
 import { SparseDataStore } from '../data/SparseDataStore.js';
 import {
@@ -225,7 +226,8 @@ export class FormulaEngine {
       return cell.formulaResult ?? null;
     }
 
-    return cell.value;
+    // Convert FormattedText to plain text for formulas
+    return valueToPlainValue(cell.value);
   }
 
   // ===========================================================================

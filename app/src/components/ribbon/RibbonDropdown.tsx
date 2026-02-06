@@ -31,6 +31,8 @@ export interface RibbonDropdownProps<T extends string | number> {
   tooltip: string;
   /** Accessible label */
   ariaLabel: string;
+  /** Whether this dropdown preserves edit session (default: true) */
+  preserveEdit?: boolean;
 }
 
 // =============================================================================
@@ -46,6 +48,7 @@ function RibbonDropdownInner<T extends string | number>(
     width,
     tooltip,
     ariaLabel,
+    preserveEdit = true,
   }: RibbonDropdownProps<T>,
 ) {
   const handleChange = useCallback(
@@ -74,6 +77,7 @@ function RibbonDropdownInner<T extends string | number>(
       title={tooltip}
       aria-label={ariaLabel}
       style={widthStyle}
+      data-preserve-edit={preserveEdit || undefined}
     >
       {options.map((opt) => (
         <option key={String(opt.value)} value={String(opt.value)}>

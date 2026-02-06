@@ -20,7 +20,7 @@
  * - No UI/DOM dependencies
  */
 
-import { Cell, CellRef, CellRange, CellFormat } from '../types/index.js';
+import { Cell, CellRef, CellRange, CellFormat, valueToPlainValue } from '../types/index.js';
 
 // =============================================================================
 // Types - Search Configuration
@@ -382,7 +382,7 @@ export class FindReplace {
         });
       } else {
         // Replace in value
-        oldValue = String(cell.value ?? '');
+        oldValue = String(valueToPlainValue(cell.value) ?? '');
         newValue = this.replaceInString(oldValue, match.startIndex, match.length, value);
 
         this.writer.setCell(match.cell.row, match.cell.col, {
@@ -476,7 +476,7 @@ export class FindReplace {
 
         // Determine which string to modify
         const isFormulaReplace = sortedMatches[0].inFormula && cell.formula;
-        let currentValue = isFormulaReplace ? cell.formula! : String(cell.value ?? '');
+        let currentValue = isFormulaReplace ? cell.formula! : String(valueToPlainValue(cell.value) ?? '');
 
         // Replace each match (in reverse order to preserve indices)
         for (const match of sortedMatches) {
@@ -571,7 +571,7 @@ export class FindReplace {
 
       // Search in values
       if (searchIn === 'values' || searchIn === 'all') {
-        const valueStr = cell.value === null ? '' : String(cell.value);
+        const valueStr = cell.value === null ? '' : String(valueToPlainValue(cell.value));
         const valueMatches = this.findInString(valueStr, pattern, options.wholeCell);
 
         for (const m of valueMatches) {
@@ -582,7 +582,7 @@ export class FindReplace {
             length: m.length,
             inFormula: false,
             inFormat: false,
-            cellValue: cell.value,
+            cellValue: valueToPlainValue(cell.value),
             formula: cell.formula,
           });
         }
@@ -600,7 +600,7 @@ export class FindReplace {
             length: m.length,
             inFormula: true,
             inFormat: false,
-            cellValue: cell.value,
+            cellValue: valueToPlainValue(cell.value),
             formula: cell.formula,
           });
         }
@@ -616,7 +616,7 @@ export class FindReplace {
             length: 0,
             inFormula: false,
             inFormat: true,
-            cellValue: cell.value,
+            cellValue: valueToPlainValue(cell.value),
             formula: cell.formula,
           });
         }

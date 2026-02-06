@@ -14,7 +14,7 @@
 
 import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useGridContext } from './GridContext';
-import type { RenderCell, CellFormat } from './types';
+import type { RenderCell, CellFormat, FormattedText, CharacterFormat } from './types';
 
 export interface CellLayerProps {
   className?: string;
@@ -81,6 +81,133 @@ function formatToStyles(format: CellFormat): React.CSSProperties {
   return styles;
 }
 
+// =============================================================================
+// Rich Text Support - Production-Grade Character-Level Formatting
+// =============================================================================
+
+/**
+ * Format cache for character formats (performance optimization)
+ * WeakMap allows garbage collection of unused formats
+ */
+const characterFormatCache = new WeakMap<CharacterFormat, React.CSSProperties>();
+
+/**
+ * Convert CharacterFormat to React CSSProperties with caching
+ * Merges character format with cell format for final styles
+ */
+function characterFormatToStyles(
+  cellFormat: CellFormat,
+  charFormat?: CharacterFormat
+): React.CSSProperties {
+  // Fast path: no character format, return cell format styles
+  if (!charFormat) {
+    return formatToStyles(cellFormat);
+  }
+
+  // Check cache for character format
+  const cached = characterFormatCache.get(charFormat);
+  if (cached) {
+    return cached;
+  }
+
+  // Build merged styles (character format overrides cell format)
+  const styles: React.CSSProperties = {};
+
+  // Typography - character format takes precedence
+  const fontFamily = charFormat.fontFamily ?? cellFormat.fontFamily;
+  const fontSize = charFormat.fontSize ?? cellFormat.fontSize;
+  const fontColor = charFormat.fontColor ?? cellFormat.fontColor;
+  const bold = charFormat.bold ?? cellFormat.bold;
+  const italic = charFormat.italic ?? cellFormat.italic;
+  const underline = charFormat.underline ?? cellFormat.underline;
+  const strikethrough = charFormat.strikethrough ?? cellFormat.strikethrough;
+
+  if (fontFamily) styles.fontFamily = fontFamily;
+  if (fontSize) styles.fontSize = `${fontSize}pt`;
+  if (fontColor) styles.color = safeColor(fontColor);
+  if (bold) styles.fontWeight = 'bold';
+  if (italic) styles.fontStyle = 'italic';
+  if (underline) styles.textDecoration = 'underline';
+  if (strikethrough) {
+    styles.textDecoration = underline
+      ? 'underline line-through'
+      : 'line-through';
+  }
+
+  // Cache and return
+  characterFormatCache.set(charFormat, styles);
+  return styles;
+}
+
+/**
+ * Render FormattedText as multiple spans with character-level formatting
+ * Production-grade: Excel-compatible, optimized, handles edge cases
+ */
+function renderFormattedText(
+  richText: FormattedText,
+  cellFormat: CellFormat
+): React.ReactNode {
+  const { text, runs } = richText;
+
+  // Edge case: empty text
+  if (text.length === 0) {
+    return null;
+  }
+
+  // Edge case: no runs, render as plain text
+  if (runs.length === 0) {
+    return text;
+  }
+
+  // Build spans for each run
+  const spans: React.ReactNode[] = [];
+  let lastEnd = 0;
+
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+
+    // Validate run bounds
+    const start = Math.max(0, Math.min(run.start, text.length));
+    const end = Math.max(start, Math.min(run.end, text.length));
+
+    // Add unformatted gap before this run (if any)
+    if (start > lastEnd) {
+      const gapText = text.slice(lastEnd, start);
+      spans.push(
+        <span key={`gap-${lastEnd}`} style={formatToStyles(cellFormat)}>
+          {gapText}
+        </span>
+      );
+    }
+
+    // Add formatted run
+    if (end > start) {
+      const runText = text.slice(start, end);
+      const runStyles = characterFormatToStyles(cellFormat, run.format);
+
+      spans.push(
+        <span key={`run-${start}`} style={runStyles}>
+          {runText}
+        </span>
+      );
+    }
+
+    lastEnd = end;
+  }
+
+  // Add trailing unformatted text (if any)
+  if (lastEnd < text.length) {
+    const trailingText = text.slice(lastEnd);
+    spans.push(
+      <span key={`trail-${lastEnd}`} style={formatToStyles(cellFormat)}>
+        {trailingText}
+      </span>
+    );
+  }
+
+  return <>{spans}</>;
+}
+
 /**
  * Determine z-index based on frozen state
  * Frozen corner (both) > Frozen row/col > Scrollable
@@ -111,6 +238,7 @@ const Cell: React.FC<CellProps> = memo(
     // Ref for number overflow detection (Excel-style #### hash fill)
     const contentRef = useRef<HTMLSpanElement>(null);
     const isNumberType = cell.valueType === 'number';
+    const hasRichText = !!cell.richText;
 
     // Excel-style overflow: numbers that don't fit the cell show #### instead
     // of ellipsis. Runs before paint (useLayoutEffect) so there's no flash.
@@ -118,17 +246,26 @@ const Cell: React.FC<CellProps> = memo(
       const el = contentRef.current;
       if (!el || !isNumberType) return;
 
-      // Write real display value for measurement
-      el.textContent = cell.displayValue;
+      // For rich text, measure the rendered spans
+      // For plain text, measure the text content directly
+      if (hasRichText) {
+        // Rich text: measure actual rendered width of all spans
+        if (el.scrollWidth > el.clientWidth + 1) {
+          const approxCharWidth = 8;
+          const count = Math.ceil(el.clientWidth / approxCharWidth) + 2;
+          el.textContent = '#'.repeat(count);
+        }
+      } else {
+        // Plain text: measure text content
+        el.textContent = cell.displayValue;
 
-      // If content overflows cell width, replace with hash fill.
-      // CSS overflow:hidden clips the excess — same visual as Excel.
-      if (el.scrollWidth > el.clientWidth + 1) {
-        const approxCharWidth = 8;
-        const count = Math.ceil(el.clientWidth / approxCharWidth) + 2;
-        el.textContent = '#'.repeat(count);
+        if (el.scrollWidth > el.clientWidth + 1) {
+          const approxCharWidth = 8;
+          const count = Math.ceil(el.clientWidth / approxCharWidth) + 2;
+          el.textContent = '#'.repeat(count);
+        }
       }
-    }, [cell.displayValue, cell.width, isNumberType]);
+    }, [cell.displayValue, cell.richText, cell.width, isNumberType, hasRichText]);
 
     // Skip hidden merged cells
     if (cell.merge?.isHidden) {
@@ -202,8 +339,12 @@ const Cell: React.FC<CellProps> = memo(
           </span>
         )}
 
-        {/* Cell content */}
-        <span ref={contentRef} className={contentClass}>{cell.displayValue}</span>
+        {/* Cell content - render rich text or plain text */}
+        <span ref={contentRef} className={contentClass}>
+          {cell.richText
+            ? renderFormattedText(cell.richText, cell.format)
+            : cell.displayValue}
+        </span>
 
         {/* Validation error indicator (red triangle) */}
         {hasValidationError && (

@@ -328,10 +328,13 @@ export class FillHandle {
 
   /**
    * Write a generated value to the data store.
+   * Preserves FormattedText (character-level formatting) from source cells.
    */
   private writeGeneratedValue(row: number, col: number, generated: GeneratedValue): void {
     const cell: Cell = {
-      value: generated.value,
+      // Use richTextValue if present (preserves character-level formatting)
+      // Otherwise use plain value
+      value: generated.richTextValue ?? generated.value,
       type: generated.type,
       formula: generated.formula,
       format: generated.format,

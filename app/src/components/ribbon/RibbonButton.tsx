@@ -9,6 +9,11 @@
 
 import React, { memo } from 'react';
 
+/** Prevent mousedown from stealing focus from the cell editor */
+function preventFocusSteal(e: React.MouseEvent) {
+  e.preventDefault();
+}
+
 // =============================================================================
 // Base Button
 // =============================================================================
@@ -24,10 +29,12 @@ export interface RibbonButtonProps {
   onClick: () => void;
   /** Override aria-label (defaults to tooltip) */
   ariaLabel?: string;
+  /** Whether this button preserves edit session (default: true for formatting, false for structural) */
+  preserveEdit?: boolean;
 }
 
 export const RibbonButton: React.FC<RibbonButtonProps> = memo(
-  ({ icon, tooltip, disabled = false, onClick, ariaLabel }) => (
+  ({ icon, tooltip, disabled = false, onClick, ariaLabel, preserveEdit = false }) => (
     <button
       type="button"
       className="ribbon-btn"
@@ -35,6 +42,8 @@ export const RibbonButton: React.FC<RibbonButtonProps> = memo(
       aria-label={ariaLabel ?? tooltip}
       disabled={disabled}
       onClick={onClick}
+      onMouseDown={preserveEdit ? preventFocusSteal : undefined}
+      data-preserve-edit={preserveEdit || undefined}
     >
       {icon}
     </button>
@@ -53,15 +62,17 @@ export interface RibbonToggleButtonProps extends RibbonButtonProps {
 }
 
 export const RibbonToggleButton: React.FC<RibbonToggleButtonProps> = memo(
-  ({ icon, tooltip, disabled = false, onClick, ariaLabel, pressed }) => (
+  ({ icon, tooltip, disabled = false, onClick, ariaLabel, pressed, preserveEdit = true }) => (
     <button
       type="button"
-      className="ribbon-btn"
+      className={`ribbon-btn${pressed ? ' ribbon-btn-active' : ''}`}
       title={tooltip}
       aria-label={ariaLabel ?? tooltip}
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
+      onMouseDown={preserveEdit ? preventFocusSteal : undefined}
+      data-preserve-edit={preserveEdit || undefined}
     >
       {icon}
     </button>

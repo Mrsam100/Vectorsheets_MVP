@@ -46,6 +46,8 @@ export interface RibbonColorPickerProps {
   tooltip: string;
   /** Disabled state */
   disabled?: boolean;
+  /** Whether this color picker preserves edit session (default: true) */
+  preserveEdit?: boolean;
 }
 
 // =============================================================================
@@ -56,7 +58,7 @@ const SWATCH_COLS = 10;
 const SWATCH_COUNT = COLOR_PALETTE.length;
 
 export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
-  ({ value, onChange, icon, tooltip, disabled = false }) => {
+  ({ value, onChange, icon, tooltip, disabled = false, preserveEdit = true }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -188,6 +190,7 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
           disabled={disabled}
           onClick={toggleOpen}
           style={TRIGGER_STYLE}
+          data-preserve-edit={preserveEdit || undefined}
         >
           {icon}
           {/* Color indicator bar */}
@@ -205,6 +208,7 @@ export const RibbonColorPicker: React.FC<RibbonColorPickerProps> = memo(
             role="listbox"
             aria-label={`${tooltip} colors`}
             onClick={handleSwatchClick}
+            data-preserve-edit={preserveEdit || undefined}
           >
             {/* Reset / No Color — ArrowDown from here enters the swatch grid */}
             <button

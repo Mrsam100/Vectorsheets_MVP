@@ -17,6 +17,7 @@ import {
   Selection,
   Viewport,
   RenderCell,
+  valueToPlainValue,
 } from './types/index.js';
 import { SparseDataStore } from './data/SparseDataStore.js';
 import {
@@ -266,7 +267,8 @@ export class SpreadsheetEngine {
     if (cell.formula !== undefined) {
       return cell.formulaResult ?? null;
     }
-    return cell.value;
+    // Convert FormattedText to plain text
+    return valueToPlainValue(cell.value);
   }
 
   /**
@@ -281,6 +283,7 @@ export class SpreadsheetEngine {
         for (let col = range.startCol; col <= range.endCol; col++) {
           this.dataStore.deleteCell(row, col);
           this.formulaEngine.removeFormula(row, col);
+          this.events.onCellChange?.(row, col, null);
         }
       }
     }
@@ -601,7 +604,8 @@ export class SpreadsheetEngine {
         } else if (options?.includeFormulas && cell.formula) {
           rowData.push(cell.formula);
         } else {
-          rowData.push(cell.formulaResult ?? cell.value);
+          // Convert FormattedText to plain text
+          rowData.push(cell.formulaResult ?? valueToPlainValue(cell.value));
         }
       }
       result.push(rowData);
