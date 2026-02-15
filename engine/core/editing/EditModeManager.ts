@@ -34,6 +34,9 @@ import {
   FormattedText,
   CharacterFormat,
   isFormattedText,
+  EditSession,
+  EditSessionSubscriber,
+  EditSessionUnsubscribe,
 } from '../types/index.js';
 import {
   ensureFormattedText,
@@ -117,8 +120,31 @@ export interface HandleKeyResult {
 const REF_TRIGGER_CHARS = new Set(['=', '+', '-', '*', '/', '^', '(', ',', ':', '<', '>', '&', ';']);
 
 export class EditModeManager {
-  private state: EditState;
+  // ===== New EditSession Pattern =====
+  /**
+   * Current edit session (null when not editing).
+   * This is the single source of truth for all editing state.
+   */
+  private session: EditSession | null = null;
+
+  /**
+   * Subscribers for React's useSyncExternalStore.
+   * Called whenever session changes.
+   */
+  private listeners = new Set<EditSessionSubscriber>();
+
+  // ===== Legacy Support =====
+  /**
+   * Old callback-based event handlers (deprecated).
+   * Will be removed after UI migration to EditSession.
+   */
   private events: EditModeManagerEvents = {};
+
+  /**
+   * Legacy EditState for backward compatibility.
+   * Derived from EditSession. Will be removed after UI migration.
+   */
+  private state: EditState;
 
   constructor() {
     this.state = this.createInitialState();
@@ -135,6 +161,174 @@ export class EditModeManager {
       textSelection: null,
       formulaBarFocused: false,
     };
+  }
+
+  // ===========================================================================
+  // Subscription API (React 18's useSyncExternalStore)
+  // ===========================================================================
+
+  /**
+   * Subscribe to edit session changes.
+   * Compatible with React's useSyncExternalStore.
+   *
+   * @param listener Callback called when session changes
+   * @returns Unsubscribe function
+   *
+   * @example
+   * ```tsx
+   * const editSession = useSyncExternalStore(
+   *   editModeManager.subscribe,
+   *   editModeManager.getSnapshot
+   * );
+   * ```
+   */
+  subscribe = (listener: EditSessionSubscriber): EditSessionUnsubscribe => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  /**
+   * Get current edit session snapshot.
+   * Compatible with React's useSyncExternalStore.
+   *
+   * @returns Current EditSession or null if not editing
+   */
+  getSnapshot = (): EditSession | null => {
+    return this.session;
+  };
+
+  /**
+   * Notify all subscribers that session has changed.
+   * Called after every EditSession mutation.
+   */
+  private notifyListeners(): void {
+    this.listeners.forEach(listener => listener());
+  }
+
+  /**
+   * Update legacy EditState from current EditSession.
+   * For backward compatibility with existing code.
+   * TODO: Remove after full UI migration to EditSession.
+   */
+  private updateLegacyState(): void {
+    if (this.session) {
+      this.state = {
+        mode: this.session.mode,
+        isEditing: true,
+        editingCell: this.session.editingCell,
+        originalValue: this.session.originalValue,
+        currentValue: this.session.formattedValue ?? this.session.text,
+        cursorPosition: this.session.cursor,
+        textSelection:
+          this.session.selectionStart !== -1 && this.session.selectionEnd !== -1
+            ? { start: this.session.selectionStart, end: this.session.selectionEnd }
+            : null,
+        formulaBarFocused: false, // Legacy field, not tracked in EditSession
+      };
+    } else {
+      this.state = this.createInitialState();
+    }
+  }
+
+  /**
+   * Parse formula text and extract cell references for highlighting.
+   * Example: "=A1+B2*C3" → [{row: 0, col: 0}, {row: 1, col: 1}, {row: 2, col: 2}]
+   */
+  private parseFormulaReferences(text: string): CellRef[] {
+    if (!text.startsWith('=')) {
+      return [];
+    }
+
+    const refs: CellRef[] = [];
+    // Regex: Match cell references like A1, $A$1, A$1, $A1
+    // Matches: [optional $][A-Z]+[optional $][0-9]+
+    const refRegex = /\$?[A-Z]+\$?\d+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = refRegex.exec(text)) !== null) {
+      const refStr = match[0];
+      // Remove $ signs for parsing
+      const cleanRef = refStr.replace(/\$/g, '');
+
+      // Parse column (letters) and row (numbers)
+      const colMatch = cleanRef.match(/[A-Z]+/);
+      const rowMatch = cleanRef.match(/\d+/);
+
+      if (colMatch && rowMatch) {
+        const col = this.columnLetterToIndex(colMatch[0]);
+        const row = parseInt(rowMatch[0], 10) - 1; // Convert to 0-based
+
+        if (row >= 0 && col >= 0) {
+          refs.push({ row, col });
+        }
+      }
+    }
+
+    return refs;
+  }
+
+  /**
+   * Convert column letters to 0-based index.
+   * A → 0, B → 1, ..., Z → 25, AA → 26, etc.
+   */
+  private columnLetterToIndex(letters: string): number {
+    let col = 0;
+    for (let i = 0; i < letters.length; i++) {
+      col = col * 26 + (letters.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+    }
+    return col - 1; // Convert to 0-based
+  }
+
+  /**
+   * Update edit session with partial updates (immutable pattern).
+   * Creates new EditSession object with updates applied.
+   *
+   * @param updates Partial fields to update
+   */
+  private updateSession(updates: Partial<EditSession>): void {
+    if (!this.session) {
+      return; // No session to update
+    }
+
+    // Create new session with updates
+    this.session = {
+      ...this.session,
+      ...updates,
+      // Auto-compute derived fields
+      isDirty:
+        updates.text !== undefined
+          ? this.isValueDirty(updates.text, this.session.originalValue)
+          : this.session.isDirty,
+      isFormula:
+        updates.text !== undefined ? updates.text.startsWith('=') : this.session.isFormula,
+      referencedCells:
+        updates.text !== undefined && updates.text.startsWith('=')
+          ? this.parseFormulaReferences(updates.text)
+          : updates.text !== undefined
+          ? []
+          : this.session.referencedCells,
+    };
+
+    // Update legacy state for backward compatibility
+    this.updateLegacyState();
+
+    // Notify subscribers
+    this.notifyListeners();
+  }
+
+  /**
+   * Check if current text differs from original value.
+   */
+  private isValueDirty(
+    currentText: string,
+    originalValue: string | number | boolean | FormattedText | null
+  ): boolean {
+    const originalText = isFormattedText(originalValue)
+      ? originalValue.text
+      : originalValue === null
+      ? ''
+      : String(originalValue);
+    return currentText !== originalText;
   }
 
   // ===========================================================================
@@ -203,38 +397,52 @@ export class EditModeManager {
     replaceContent: boolean = false,
     initialChar?: string
   ): void {
-    // Convert initial value to string or FormattedText
-    let currentValue: string | FormattedText;
+    // Convert initial value to text and FormattedText
     let plainText: string;
+    let formattedValue: FormattedText | null = null;
 
     if (isFormattedText(initialValue)) {
       // Keep as FormattedText if it has character formatting
-      currentValue = initialValue;
+      formattedValue = initialValue;
       plainText = initialValue.text;
     } else {
       // Convert to string
       plainText = initialValue === null ? '' : String(initialValue);
-      currentValue = plainText;
     }
 
     if (replaceContent) {
-      currentValue = initialChar ?? '';
       plainText = initialChar ?? '';
+      formattedValue = null; // Replace mode clears formatting
     }
 
-    const textLength = typeof currentValue === 'string' ? currentValue.length : currentValue.text.length;
+    const textLength = plainText.length;
 
-    this.state = {
+    // Create new EditSession
+    this.session = {
+      text: plainText,
+      formattedValue,
+      cursor: replaceContent ? (initialChar?.length ?? 0) : textLength,
+      selectionStart: replaceContent ? -1 : 0,
+      selectionEnd: replaceContent ? -1 : textLength,
       mode,
-      isEditing: true,
       editingCell: { ...cell },
       originalValue: initialValue,
-      currentValue: replaceContent ? (initialChar ?? '') : currentValue,
-      cursorPosition: replaceContent ? (initialChar?.length ?? 0) : textLength,
-      textSelection: replaceContent ? null : { start: 0, end: textLength },
-      formulaBarFocused: false,
+      isDirty: false,
+      isFormula: plainText.startsWith('='),
+      referencedCells: this.parseFormulaReferences(plainText),
+      isComposing: false,
+      compositionStart: 0,
+      compositionEnd: 0,
+      pendingFormat: undefined,
     };
 
+    // Update legacy state for backward compatibility
+    this.updateLegacyState();
+
+    // Notify subscribers (React components)
+    this.notifyListeners();
+
+    // Legacy event handlers
     this.events.onEditStart?.(cell, plainText);
     this.events.onModeChange?.(mode, 'navigate');
   }
@@ -243,17 +451,18 @@ export class EditModeManager {
    * End editing (confirm or cancel)
    */
   endEditing(confirm: boolean): { value: string | FormattedText; cell: CellRef } | null {
-    if (!this.state.isEditing || !this.state.editingCell) {
+    if (!this.session) {
       return null;
     }
 
     let finalValue: string | FormattedText;
 
     if (confirm) {
-      finalValue = this.state.currentValue;
+      // Confirmed: use current edited value
+      finalValue = this.session.formattedValue ?? this.session.text;
     } else {
       // Cancelled: restore original value
-      const original = this.state.originalValue;
+      const original = this.session.originalValue;
       if (isFormattedText(original)) {
         finalValue = original;
       } else {
@@ -263,20 +472,28 @@ export class EditModeManager {
 
     const result = {
       value: finalValue,
-      cell: { ...this.state.editingCell },
+      cell: { ...this.session.editingCell! },
     };
 
-    const previousMode = this.state.mode;
-    const plainText = isFormattedText(finalValue) ? finalValue.text : finalValue;
-    this.events.onEditEnd?.(confirm, plainText);
+    const previousMode = this.session.mode;
+    const plainText = isFormattedText(finalValue) ? finalValue.text : String(finalValue);
 
-    // Call onCommit if confirmed
+    // Legacy event handlers
+    this.events.onEditEnd?.(confirm, plainText);
     if (confirm) {
       this.events.onCommit?.(result.cell, plainText);
     }
 
-    // Reset state
-    this.state = this.createInitialState();
+    // Clear session (exit editing)
+    this.session = null;
+
+    // Update legacy state
+    this.updateLegacyState();
+
+    // Notify subscribers
+    this.notifyListeners();
+
+    // Legacy event
     this.events.onModeChange?.('navigate', previousMode);
 
     return confirm ? result : null;
@@ -341,7 +558,13 @@ export class EditModeManager {
    * Set mode directly (internal use or explicit transitions)
    */
   setMode(mode: EditMode): void {
-    if (this.state.mode !== mode) {
+    // Update EditSession if editing
+    if (this.session && this.session.mode !== mode) {
+      const previousMode = this.session.mode;
+      this.updateSession({ mode });
+      this.events.onModeChange?.(mode, previousMode);
+    } else if (!this.session && this.state.mode !== mode) {
+      // Fallback for legacy state when not editing
       const previousMode = this.state.mode;
       this.state.mode = mode;
       this.events.onModeChange?.(mode, previousMode);
@@ -401,13 +624,23 @@ export class EditModeManager {
    * @returns The committed result, or null if not editing
    */
   commit(value?: string | FormattedText): { cell: CellRef; value: string | FormattedText } | null {
-    if (!this.state.isEditing || !this.state.editingCell) {
+    if (!this.session) {
       return null;
     }
 
-    // Update value if provided
+    // Update session value if override provided
     if (value !== undefined) {
-      this.state.currentValue = value;
+      if (isFormattedText(value)) {
+        this.updateSession({
+          text: value.text,
+          formattedValue: value,
+        });
+      } else {
+        this.updateSession({
+          text: String(value),
+          formattedValue: null,
+        });
+      }
     }
 
     return this.endEditing(true);
@@ -429,14 +662,17 @@ export class EditModeManager {
    * Accepts string or FormattedText
    */
   setValue(value: string | FormattedText): void {
-    this.state.currentValue = value;
-    const plainText = isFormattedText(value) ? value.text : value;
-    this.events.onValueChange?.(plainText);
+    if (!this.session) return;
 
-    // Auto-switch to point mode if typing a formula
-    if (plainText.startsWith('=') && this.state.mode === 'enter') {
-      // Don't auto-switch, let user decide
-    }
+    const plainText = isFormattedText(value) ? value.text : value;
+
+    this.updateSession({
+      text: plainText,
+      formattedValue: isFormattedText(value) ? value : null,
+    });
+
+    // Legacy event
+    this.events.onValueChange?.(plainText);
   }
 
   /**
@@ -444,54 +680,59 @@ export class EditModeManager {
    * Handles both plain string and FormattedText values
    */
   insertText(text: string): void {
-    const { currentValue, cursorPosition, textSelection } = this.state;
+    if (!this.session) return;
 
-    // If currentValue is FormattedText, use rich text operations
-    if (isFormattedText(currentValue)) {
+    const { formattedValue, cursor, selectionStart, selectionEnd } = this.session;
+    const hasSelection = selectionStart !== -1 && selectionEnd !== -1 && selectionStart !== selectionEnd;
+
+    // If formattedValue is set, use rich text operations
+    if (formattedValue) {
       let newFt: FormattedText;
       let newCursor: number;
 
-      if (textSelection && textSelection.start !== textSelection.end) {
+      if (hasSelection) {
         // Replace selection: delete then insert
-        newFt = rtDeleteText(currentValue, textSelection.start, textSelection.end);
-        newFt = rtInsertText(newFt, textSelection.start, text);
-        newCursor = textSelection.start + text.length;
+        newFt = rtDeleteText(formattedValue, selectionStart, selectionEnd);
+        newFt = rtInsertText(newFt, selectionStart, text);
+        newCursor = selectionStart + text.length;
       } else {
         // Insert at cursor
-        newFt = rtInsertText(currentValue, cursorPosition, text);
-        newCursor = cursorPosition + text.length;
+        newFt = rtInsertText(formattedValue, cursor, text);
+        newCursor = cursor + text.length;
       }
 
-      this.state.currentValue = newFt;
-      this.state.cursorPosition = newCursor;
-      this.state.textSelection = null;
+      this.updateSession({
+        text: newFt.text,
+        formattedValue: newFt,
+        cursor: newCursor,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
 
       this.events.onValueChange?.(formattedTextToString(newFt));
       this.events.onCursorChange?.(newCursor, null);
     } else {
       // Plain string
+      const currentValue = this.session.text;
       let newValue: string;
       let newCursor: number;
 
-      if (textSelection && textSelection.start !== textSelection.end) {
+      if (hasSelection) {
         // Replace selection
-        newValue =
-          currentValue.slice(0, textSelection.start) +
-          text +
-          currentValue.slice(textSelection.end);
-        newCursor = textSelection.start + text.length;
+        newValue = currentValue.slice(0, selectionStart) + text + currentValue.slice(selectionEnd);
+        newCursor = selectionStart + text.length;
       } else {
         // Insert at cursor
-        newValue =
-          currentValue.slice(0, cursorPosition) +
-          text +
-          currentValue.slice(cursorPosition);
-        newCursor = cursorPosition + text.length;
+        newValue = currentValue.slice(0, cursor) + text + currentValue.slice(cursor);
+        newCursor = cursor + text.length;
       }
 
-      this.state.currentValue = newValue;
-      this.state.cursorPosition = newCursor;
-      this.state.textSelection = null;
+      this.updateSession({
+        text: newValue,
+        cursor: newCursor,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
 
       this.events.onValueChange?.(newValue);
       this.events.onCursorChange?.(newCursor, null);
@@ -503,63 +744,68 @@ export class EditModeManager {
    * Handles both plain string and FormattedText values
    */
   deleteText(direction: 'backward' | 'forward', count: number = 1): void {
-    const { currentValue, cursorPosition, textSelection } = this.state;
+    if (!this.session) return;
 
-    // If currentValue is FormattedText, use rich text operations
-    if (isFormattedText(currentValue)) {
+    const { formattedValue, cursor, selectionStart, selectionEnd } = this.session;
+    const hasSelection = selectionStart !== -1 && selectionEnd !== -1 && selectionStart !== selectionEnd;
+
+    // If formattedValue is set, use rich text operations
+    if (formattedValue) {
       let newFt: FormattedText;
       let newCursor: number;
 
-      if (textSelection && textSelection.start !== textSelection.end) {
+      if (hasSelection) {
         // Delete selection
-        newFt = rtDeleteText(currentValue, textSelection.start, textSelection.end);
-        newCursor = textSelection.start;
+        newFt = rtDeleteText(formattedValue, selectionStart, selectionEnd);
+        newCursor = selectionStart;
       } else if (direction === 'backward') {
         // Backspace
-        const deleteStart = Math.max(0, cursorPosition - count);
-        newFt = rtDeleteText(currentValue, deleteStart, cursorPosition);
+        const deleteStart = Math.max(0, cursor - count);
+        newFt = rtDeleteText(formattedValue, deleteStart, cursor);
         newCursor = deleteStart;
       } else {
         // Delete
-        newFt = rtDeleteText(currentValue, cursorPosition, cursorPosition + count);
-        newCursor = cursorPosition;
+        newFt = rtDeleteText(formattedValue, cursor, cursor + count);
+        newCursor = cursor;
       }
 
-      this.state.currentValue = newFt;
-      this.state.cursorPosition = newCursor;
-      this.state.textSelection = null;
+      this.updateSession({
+        text: newFt.text,
+        formattedValue: newFt,
+        cursor: newCursor,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
 
       this.events.onValueChange?.(formattedTextToString(newFt));
       this.events.onCursorChange?.(newCursor, null);
     } else {
       // Plain string
+      const currentValue = this.session.text;
       let newValue: string;
       let newCursor: number;
 
-      if (textSelection && textSelection.start !== textSelection.end) {
+      if (hasSelection) {
         // Delete selection
-        newValue =
-          currentValue.slice(0, textSelection.start) +
-          currentValue.slice(textSelection.end);
-        newCursor = textSelection.start;
+        newValue = currentValue.slice(0, selectionStart) + currentValue.slice(selectionEnd);
+        newCursor = selectionStart;
       } else if (direction === 'backward') {
         // Backspace
-        const deleteStart = Math.max(0, cursorPosition - count);
-        newValue =
-          currentValue.slice(0, deleteStart) +
-          currentValue.slice(cursorPosition);
+        const deleteStart = Math.max(0, cursor - count);
+        newValue = currentValue.slice(0, deleteStart) + currentValue.slice(cursor);
         newCursor = deleteStart;
       } else {
         // Delete
-        newValue =
-          currentValue.slice(0, cursorPosition) +
-          currentValue.slice(cursorPosition + count);
-        newCursor = cursorPosition;
+        newValue = currentValue.slice(0, cursor) + currentValue.slice(cursor + count);
+        newCursor = cursor;
       }
 
-      this.state.currentValue = newValue;
-      this.state.cursorPosition = newCursor;
-      this.state.textSelection = null;
+      this.updateSession({
+        text: newValue,
+        cursor: newCursor,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
 
       this.events.onValueChange?.(newValue);
       this.events.onCursorChange?.(newCursor, null);
@@ -575,17 +821,24 @@ export class EditModeManager {
    * Works for both string and FormattedText
    */
   private getTextLength(): number {
-    const { currentValue } = this.state;
-    return typeof currentValue === 'string' ? currentValue.length : currentValue.text.length;
+    if (!this.session) return 0;
+    return this.session.text.length;
   }
 
   /**
    * Set cursor position
    */
   setCursorPosition(position: number): void {
+    if (!this.session) return;
+
     const clampedPosition = Math.max(0, Math.min(this.getTextLength(), position));
-    this.state.cursorPosition = clampedPosition;
-    this.state.textSelection = null;
+
+    this.updateSession({
+      cursor: clampedPosition,
+      selectionStart: -1,
+      selectionEnd: -1,
+    });
+
     this.events.onCursorChange?.(clampedPosition, null);
   }
 
@@ -593,14 +846,19 @@ export class EditModeManager {
    * Set text selection
    */
   setTextSelection(start: number, end: number): void {
+    if (!this.session) return;
+
     const maxLen = this.getTextLength();
-    const selection = {
-      start: Math.max(0, Math.min(maxLen, start)),
-      end: Math.max(0, Math.min(maxLen, end)),
-    };
-    this.state.textSelection = selection;
-    this.state.cursorPosition = selection.end;
-    this.events.onCursorChange?.(selection.end, selection);
+    const clampedStart = Math.max(0, Math.min(maxLen, start));
+    const clampedEnd = Math.max(0, Math.min(maxLen, end));
+
+    this.updateSession({
+      selectionStart: clampedStart,
+      selectionEnd: clampedEnd,
+      cursor: clampedEnd, // Cursor at end of selection
+    });
+
+    this.events.onCursorChange?.(clampedEnd, { start: clampedStart, end: clampedEnd });
   }
 
   /**
@@ -675,45 +933,51 @@ export class EditModeManager {
    * For FormattedText values, preserves existing formatting.
    */
   insertTextWithFormat(text: string, format?: Partial<CharacterFormat>): void {
-    const { currentValue, cursorPosition, textSelection, pendingFormat } = this.state;
+    if (!this.session) return;
+
+    const { formattedValue, cursor, selectionStart, selectionEnd, pendingFormat } = this.session;
+    const hasSelection = selectionStart !== -1 && selectionEnd !== -1 && selectionStart !== selectionEnd;
 
     // Determine format to apply
     const formatToApply = format ?? pendingFormat;
 
-    // If currentValue is FormattedText or has format to apply, use rich text operations
-    if (isFormattedText(currentValue) || formatToApply) {
-      const ft = isFormattedText(currentValue)
-        ? currentValue
-        : ensureFormattedText(currentValue);
+    // If formattedValue is set or has format to apply, use rich text operations
+    if (formattedValue || formatToApply) {
+      const ft = formattedValue ?? ensureFormattedText(this.session.text);
 
       // Handle selection replacement or insertion
       let newFt: FormattedText;
       let newCursor: number;
 
-      if (textSelection && textSelection.start !== textSelection.end) {
+      if (hasSelection) {
         // Replace selection: delete then insert
-        newFt = rtDeleteText(ft, textSelection.start, textSelection.end);
-        newFt = rtInsertText(newFt, textSelection.start, text);
-        newCursor = textSelection.start + text.length;
+        newFt = rtDeleteText(ft, selectionStart, selectionEnd);
+        newFt = rtInsertText(newFt, selectionStart, text);
+        newCursor = selectionStart + text.length;
 
         // Apply format if specified
         if (formatToApply) {
-          newFt = rtApplyFormat(newFt, textSelection.start, newCursor, formatToApply);
+          newFt = rtApplyFormat(newFt, selectionStart, newCursor, formatToApply);
         }
       } else {
         // Insert at cursor
-        newFt = rtInsertText(ft, cursorPosition, text);
-        newCursor = cursorPosition + text.length;
+        newFt = rtInsertText(ft, cursor, text);
+        newCursor = cursor + text.length;
 
         // Apply format if specified
         if (formatToApply) {
-          newFt = rtApplyFormat(newFt, cursorPosition, newCursor, formatToApply);
+          newFt = rtApplyFormat(newFt, cursor, newCursor, formatToApply);
         }
       }
 
-      this.state.currentValue = newFt;
-      this.state.cursorPosition = newCursor;
-      this.state.textSelection = null;
+      this.updateSession({
+        text: newFt.text,
+        formattedValue: newFt,
+        cursor: newCursor,
+        selectionStart: -1,
+        selectionEnd: -1,
+        pendingFormat: undefined, // Clear pending format after use
+      });
 
       this.events.onValueChange?.(formattedTextToString(newFt));
       this.events.onCursorChange?.(newCursor, null);
@@ -721,9 +985,6 @@ export class EditModeManager {
       // Plain string: use existing insertText method
       this.insertText(text);
     }
-
-    // Clear pending format after use
-    this.state.pendingFormat = undefined;
   }
 
   /**
@@ -732,16 +993,19 @@ export class EditModeManager {
    * Excel-compatible: Toggles format when no selection (e.g., Bold on/off).
    */
   applyCharacterFormat(format: Partial<CharacterFormat>): void {
-    const { currentValue, textSelection, cursorPosition } = this.state;
+    if (!this.session) return;
 
-    if (!textSelection || textSelection.start === textSelection.end) {
+    const { formattedValue, selectionStart, selectionEnd, cursor, pendingFormat } = this.session;
+    const hasSelection = selectionStart !== -1 && selectionEnd !== -1 && selectionStart !== selectionEnd;
+
+    if (!hasSelection) {
       // No selection: TOGGLE format in pending state (Excel behavior)
-      const currentPending = this.state.pendingFormat ?? {};
+      const currentPending = pendingFormat ?? {};
 
       // Get current format at cursor for toggle logic
       let currentFormat: CharacterFormat | undefined;
-      if (isFormattedText(currentValue) && cursorPosition > 0) {
-        currentFormat = getFormatAtPosition(currentValue, cursorPosition - 1);
+      if (formattedValue && cursor > 0) {
+        currentFormat = getFormatAtPosition(formattedValue, cursor - 1);
       }
 
       const newPending = { ...currentPending };
@@ -759,25 +1023,27 @@ export class EditModeManager {
         }
       }
 
-      this.state.pendingFormat = Object.keys(newPending).length > 0 ? newPending : undefined;
+      this.updateSession({
+        pendingFormat: Object.keys(newPending).length > 0 ? newPending : undefined,
+      });
       return;
     }
 
     // With selection: apply format to selection
     // Convert to FormattedText if needed
-    const ft = isFormattedText(currentValue)
-      ? currentValue
-      : ensureFormattedText(currentValue);
+    const ft = formattedValue ?? ensureFormattedText(this.session.text);
 
     // Apply format to selection
-    const newFt = rtApplyFormat(ft, textSelection.start, textSelection.end, format);
+    const newFt = rtApplyFormat(ft, selectionStart, selectionEnd, format);
 
-    this.state.currentValue = newFt;
+    this.updateSession({
+      text: newFt.text,
+      formattedValue: newFt,
+    });
+
     this.events.onValueChange?.(formattedTextToString(newFt));
 
-    // Update selection format for toolbar state
-    const selectionFormat = getFormatAtPosition(newFt, textSelection.start);
-    this.state.textSelection = { ...textSelection, format: selectionFormat };
+    // Legacy state will be updated by updateSession()
   }
 
   /**
@@ -881,7 +1147,7 @@ export class EditModeManager {
    * Insert a cell reference at cursor (when in Point mode)
    */
   insertCellReference(ref: string): void {
-    if (this.state.mode !== 'point') {
+    if (!this.session || this.session.mode !== 'point') {
       return;
     }
 
@@ -893,7 +1159,7 @@ export class EditModeManager {
    * Insert a range reference at cursor (when in Point mode)
    */
   insertRangeReference(startRef: string, endRef: string): void {
-    if (this.state.mode !== 'point') {
+    if (!this.session || this.session.mode !== 'point') {
       return;
     }
 

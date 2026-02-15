@@ -169,7 +169,7 @@ describe('Memory Leak Detection', () => {
     });
 
     // Verify clipboard has data
-    const clipboardData = clipboardManager.getClipboard();
+    const clipboardData = clipboardManager.getData();
     expect(clipboardData).not.toBeNull();
     expect(clipboardData!.cells.length).toBe(100);
 
@@ -177,7 +177,7 @@ describe('Memory Leak Detection', () => {
     clipboardManager.clear();
 
     // Verify clipboard is cleared
-    const clearedData = clipboardManager.getClipboard();
+    const clearedData = clipboardManager.getData();
     expect(clearedData).toBeNull();
 
     // Verdict: No memory leak (clipboard properly cleared) ✅
@@ -200,16 +200,19 @@ describe('Memory Leak Detection', () => {
       endCol: 9,
     });
 
-    // Verify drag is active
+    // Update drag to generate preview (drag down to row 10)
+    fillHandle.updateDrag({ row: 10, col: 0 });
+
+    // Verify drag is active and has preview
     const previewDuringDrag = fillHandle.getPreview();
-    expect(previewDuringDrag.length).toBeGreaterThan(0);
+    expect(previewDuringDrag.size).toBeGreaterThan(0);
 
     // Action 2: End drag
     fillHandle.endDrag();
 
     // Verify drag state is cleared
     const previewAfterDrag = fillHandle.getPreview();
-    expect(previewAfterDrag.length).toBe(0);
+    expect(previewAfterDrag.size).toBe(0);
 
     // Verdict: No memory leak (drag state properly cleared) ✅
   });
@@ -282,7 +285,7 @@ describe('Memory Leak Detection', () => {
     ft.runs[0].format!.bold = false;
 
     // Verify clipboard data is unaffected
-    const clipboardData = clipboardManager.getClipboard();
+    const clipboardData = clipboardManager.getData();
     const copiedCell = clipboardData!.cells[0].cell;
     const copiedFt = copiedCell.value as FormattedText;
 
@@ -382,7 +385,7 @@ describe('Garbage Collection', () => {
     });
 
     // Verify clipboard has Round 2 data
-    const clipboardData = clipboardManager.getClipboard();
+    const clipboardData = clipboardManager.getData();
     const firstCell = clipboardData!.cells[0].cell;
     const ft = firstCell.value as FormattedText;
     expect(ft.text).toContain('Round 2');

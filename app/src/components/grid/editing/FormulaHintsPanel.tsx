@@ -144,7 +144,7 @@ const ArgumentHintDisplay = memo(({
 
   return (
     <div className="formula-hints-arg" role="tooltip" aria-live="polite">
-      <div className="formula-hints-signature" style={{ fontSize: '12px', lineHeight: '1.4', whiteSpace: 'pre-wrap' as any, wordBreak: 'break-word' as any }}>{renderSignature()}</div>
+      <div className="formula-hints-signature" style={{ fontSize: '12px', lineHeight: '1.4', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{renderSignature()}</div>
       {hint.currentArg && (
         <div className="formula-hints-arg-desc" style={{ marginTop: '4px', fontSize: '11px', lineHeight: '1.3' }}>
           <span className="formula-hints-arg-name">{hint.currentArg.name}</span>

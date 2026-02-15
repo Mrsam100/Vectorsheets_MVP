@@ -29,12 +29,16 @@ import {
   createSimpleEvaluator,
 } from './formula/FormulaEngine.js';
 import { VirtualRenderer } from './rendering/VirtualRenderer.js';
+import { FilteredDimensionProvider } from './rendering/FilteredDimensionProvider.js';
 import { NavigationManager, createDataProviderAdapter } from './navigation/NavigationManager.js';
 import { SelectionManager } from './selection/SelectionManager.js';
 import {
   KeyboardHandler,
   KeyboardEvent as SpreadsheetKeyboardEvent,
 } from './navigation/KeyboardHandler.js';
+import { CommentStore } from './comments/CommentStore.js';
+import { FilterManager, type FilterDataSource } from './filtering/FilterManager.js';
+import type { FilterPredicate } from './filtering/types.js';
 
 export interface SpreadsheetEngineConfig {
   /** Initial viewport dimensions */
@@ -103,6 +107,8 @@ export class SpreadsheetEngine {
   private navigationManager: NavigationManager;
   private selectionManager: SelectionManager;
   private keyboardHandler: KeyboardHandler;
+  private commentStore: CommentStore;
+  private filterManager: FilterManager;
 
   // Configuration
   private config: Required<SpreadsheetEngineConfig>;
@@ -131,8 +137,25 @@ export class SpreadsheetEngine {
       this.config.formulaEvaluator
     );
 
-    // Initialize virtual renderer (takes dataStore as first param)
-    this.virtualRenderer = new VirtualRenderer(this.dataStore, {
+    // Initialize comment store
+    this.commentStore = new CommentStore();
+
+    // Initialize filter manager BEFORE virtual renderer (needed for filter-aware rendering)
+    const filterDataSource: FilterDataSource = {
+      getCellValue: (row, col) => {
+        const cell = this.dataStore.getCell(row, col);
+        return cell?.value ?? null;
+      },
+      getUsedRange: () => this.dataStore.getUsedRange(),
+    };
+    this.filterManager = new FilterManager(filterDataSource);
+
+    // Initialize virtual renderer with filter-aware dimension provider
+    const filteredDimensions = new FilteredDimensionProvider(
+      this.dataStore,
+      this.filterManager
+    );
+    this.virtualRenderer = new VirtualRenderer(filteredDimensions, {
       width: this.config.viewportWidth,
       height: this.config.viewportHeight,
       rowBuffer: 5,
@@ -249,6 +272,9 @@ export class SpreadsheetEngine {
 
     cell.isDirty = false;
     this.dataStore.setCell(row, col, cell);
+
+    // Invalidate filter cache (data changed)
+    this.filterManager.invalidateCache();
 
     // Trigger recalculation for affected cells
     this.formulaEngine.recalculateAffected(row, col);
@@ -631,7 +657,144 @@ export class SpreadsheetEngine {
   clear(): void {
     this.dataStore.clear();
     this.formulaEngine.clear();
+    this.commentStore.clear();
     this.navigationManager.goToCell(0, 0);
+  }
+
+  // ===========================================================================
+  // Row/Column Operations
+  // ===========================================================================
+
+  /**
+   * Insert rows at the specified position.
+   * Comments on affected rows are moved down accordingly.
+   */
+  insertRows(row: number, count: number): void {
+    // Insert rows in data store
+    this.dataStore.insertRows(row, count);
+
+    // Move comments down
+    this.commentStore.onRowsInserted(row, count);
+
+    // Invalidate filter cache (rows moved)
+    this.filterManager.invalidateCache();
+
+    // TODO: Update formulas (FormulaEngine needs updateReferencesAfterRowInsert)
+  }
+
+  /**
+   * Delete rows at the specified position.
+   * Comments on deleted rows are removed.
+   * Comments below deleted rows are moved up.
+   */
+  deleteRows(row: number, count: number): void {
+    // Delete rows in data store
+    this.dataStore.deleteRows(row, count);
+
+    // Delete/move comments
+    this.commentStore.onRowsDeleted(row, count);
+
+    // Invalidate filter cache (rows deleted)
+    this.filterManager.invalidateCache();
+
+    // TODO: Update formulas
+  }
+
+  /**
+   * Insert columns at the specified position.
+   * Comments on affected columns are moved right accordingly.
+   */
+  insertColumns(col: number, count: number): void {
+    // Insert columns in data store
+    this.dataStore.insertColumns(col, count);
+
+    // Move comments right
+    this.commentStore.onColumnsInserted(col, count);
+
+    // Invalidate filter cache (columns moved)
+    this.filterManager.invalidateCache();
+
+    // TODO: Update formulas
+  }
+
+  /**
+   * Delete columns at the specified position.
+   * Comments on deleted columns are removed.
+   * Comments to the right of deleted columns are moved left.
+   */
+  deleteColumns(col: number, count: number): void {
+    // Delete columns in data store
+    this.dataStore.deleteColumns(col, count);
+
+    // Delete/move comments
+    this.commentStore.onColumnsDeleted(col, count);
+
+    // Invalidate filter cache (columns deleted)
+    this.filterManager.invalidateCache();
+
+    // TODO: Update formulas
+  }
+
+  // ===========================================================================
+  // Comment System
+  // ===========================================================================
+
+  /**
+   * Get the comment store for managing cell comments.
+   */
+  getCommentStore(): CommentStore {
+    return this.commentStore;
+  }
+
+  /**
+   * Get the filter manager for managing column filters.
+   */
+  getFilterManager(): FilterManager {
+    return this.filterManager;
+  }
+
+  // ===========================================================================
+  // Filter Operations
+  // ===========================================================================
+
+  /**
+   * Apply a filter to a column
+   * @param column - Column index (0-based)
+   * @param predicate - Filter predicate to apply
+   */
+  applyFilter(column: number, predicate: FilterPredicate): void {
+    this.filterManager.applyFilter(column, predicate);
+  }
+
+  /**
+   * Clear filter from a specific column
+   * @param column - Column index (0-based)
+   * @returns true if a filter was removed
+   */
+  clearFilter(column: number): boolean {
+    return this.filterManager.clearFilter(column);
+  }
+
+  /**
+   * Clear all active filters
+   */
+  clearAllFilters(): void {
+    this.filterManager.clearAllFilters();
+  }
+
+  /**
+   * Get set of visible row indices after applying filters
+   * @returns Set of visible row indices
+   */
+  getFilteredRows(): Set<number> {
+    return this.filterManager.getFilteredRows();
+  }
+
+  /**
+   * Check if any filters are active
+   */
+  hasFilters(): boolean {
+    return this.filterManager.hasFilters();
   }
 
   /**
@@ -657,6 +820,7 @@ export class SpreadsheetEngine {
     navigationManager: NavigationManager;
     selectionManager: SelectionManager;
     keyboardHandler: KeyboardHandler;
+    commentStore: CommentStore;
   } {
     return {
       dataStore: this.dataStore,
@@ -665,6 +829,59 @@ export class SpreadsheetEngine {
       navigationManager: this.navigationManager,
       selectionManager: this.selectionManager,
       keyboardHandler: this.keyboardHandler,
+      commentStore: this.commentStore,
     };
+  }
+
+  /**
+   * Serialize engine state to JSON.
+   * Includes cells, formulas, and comments.
+   *
+   * TODO: Implement serialize in SparseDataStore
+   */
+  serialize(): {
+    // cells: ReturnType<SparseDataStore['serialize']>;
+    comments: ReturnType<CommentStore['serialize']>;
+    filters: ReturnType<FilterManager['serialize']>;
+  } {
+    return {
+      // TODO: Add cell serialization when SparseDataStore.serialize() is implemented
+      // cells: this.dataStore.serialize(),
+      comments: this.commentStore.serialize(),
+      filters: this.filterManager.serialize(),
+    };
+  }
+
+  /**
+   * Deserialize engine state from JSON.
+   * Restores cells, formulas, and comments.
+   *
+   * TODO: Implement deserialize in SparseDataStore
+   */
+  deserialize(data: {
+    // cells?: ReturnType<SparseDataStore['serialize']>;
+    comments?: ReturnType<CommentStore['serialize']>;
+    filters?: ReturnType<FilterManager['serialize']>;
+  }): void {
+    // Clear existing data
+    this.clear();
+
+    // TODO: Restore cells when SparseDataStore.deserialize() is implemented
+    // if (data.cells) {
+    //   this.dataStore.deserialize(data.cells);
+    // }
+
+    // Restore comments
+    if (data.comments) {
+      this.commentStore.deserialize(data.comments);
+    }
+
+    // Restore filters
+    if (data.filters) {
+      this.filterManager.deserialize(data.filters);
+    }
+
+    // Recalculate formulas
+    this.formulaEngine.calculateSync();
   }
 }

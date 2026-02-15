@@ -325,6 +325,146 @@ export interface NavigationState {
 }
 
 // ============================================================================
+// Edit Session Types (Character-Level Editing State)
+// ============================================================================
+
+/**
+ * Edit session state - single source of truth for all editing operations.
+ * Owned exclusively by EditModeManager.
+ *
+ * @remarks
+ * This interface unifies editing between CellEditorOverlay and FormulaBar,
+ * ensuring they always stay in sync with zero duplication.
+ *
+ * Design principles:
+ * - Immutable: All updates create a new EditSession object
+ * - Complete: Contains all state needed for editing (text, cursor, IME, etc.)
+ * - Observable: Components subscribe via useSyncExternalStore
+ * - Excel-compatible: Supports formula editing, point mode, absolute refs
+ *
+ * @example
+ * ```typescript
+ * // Subscribe to edit session in React component
+ * const editSession = useSyncExternalStore(
+ *   editModeManager.subscribe,
+ *   editModeManager.getSnapshot
+ * );
+ *
+ * // Check if editing
+ * if (editSession) {
+ *   console.log('Editing cell:', editSession.editingCell);
+ *   console.log('Current text:', editSession.text);
+ * }
+ * ```
+ */
+export interface EditSession {
+  // ===== Core Edit State =====
+
+  /** Current edit text (what user is typing) */
+  text: string;
+
+  /**
+   * Formatted value during editing (for character-level formatting).
+   * If null, editing plain text (use text field).
+   * If set, this is the actual editing value with format runs.
+   */
+  formattedValue: FormattedText | null;
+
+  /** Cursor position (0-based index into text) */
+  cursor: number;
+
+  /** Selection start (for text selection, -1 if none) */
+  selectionStart: number;
+
+  /** Selection end (for text selection, -1 if none) */
+  selectionEnd: number;
+
+  /** Current edit mode */
+  mode: EditMode;
+
+  // ===== Cell Context =====
+
+  /** Which cell is being edited (null if not editing) */
+  editingCell: CellRef | null;
+
+  /** Original cell value before editing (for cancel/undo) */
+  originalValue: string | number | boolean | FormattedText | null;
+
+  /** Has text been modified from original value? */
+  isDirty: boolean;
+
+  // ===== Formula Editing =====
+
+  /** Is this a formula? (text starts with '=') */
+  isFormula: boolean;
+
+  /**
+   * Referenced cells for highlighting (e.g., =A1+B2 → [A1, B2])
+   * Used to draw blue borders around referenced cells during formula editing
+   */
+  referencedCells: CellRef[];
+
+  // ===== IME Composition (for CJK input) =====
+
+  /**
+   * Is IME composition active? (e.g., typing Japanese hiragana)
+   * When true, don't trigger recalculation or formula parsing
+   */
+  isComposing: boolean;
+
+  /** Composition range start (index into text) */
+  compositionStart: number;
+
+  /** Composition range end (index into text) */
+  compositionEnd: number;
+
+  // ===== Character Formatting =====
+
+  /**
+   * Pending character format to apply on next text insert.
+   * Used for Excel-like toolbar behavior (toggle Bold when no selection).
+   */
+  pendingFormat?: Partial<CharacterFormat>;
+}
+
+/**
+ * Edit session subscriber callback.
+ * Called when EditSession changes.
+ * Compatible with React's useSyncExternalStore.
+ */
+export type EditSessionSubscriber = () => void;
+
+/**
+ * Edit session unsubscribe function.
+ * Call this to stop receiving EditSession change notifications.
+ */
+export type EditSessionUnsubscribe = () => void;
+
+/**
+ * Type guard to check if currently editing
+ */
+export function isEditingSession(session: EditSession | null): session is EditSession {
+  return session !== null && session.editingCell !== null;
+}
+
+/**
+ * Helper to check if edit session has a text selection
+ */
+export function hasTextSelection(session: EditSession): boolean {
+  return session.selectionStart !== -1 && session.selectionEnd !== -1 && session.selectionStart !== session.selectionEnd;
+}
+
+/**
+ * Helper to get selected text from edit session
+ */
+export function getSelectedText(session: EditSession): string {
+  if (!hasTextSelection(session)) return '';
+  const start = Math.min(session.selectionStart, session.selectionEnd);
+  const end = Math.max(session.selectionStart, session.selectionEnd);
+  return session.text.slice(start, end);
+}
+
+// ============================================================================
 // Rendering Types
 // ============================================================================
 

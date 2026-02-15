@@ -35,6 +35,9 @@ import { OnboardingOverlay } from './OnboardingOverlay';
 import { DevPerfOverlay } from './DevPerfOverlay';
 import { useToast } from './ToastProvider';
 import { useOnboarding } from '../hooks/useOnboarding';
+import { useFilterState, predicateToValueSet } from '../hooks/useFilterState';
+import type { FilterDataStore } from '../hooks/useFilterState';
+import type { FilterManager } from '../../../engine/core/filtering/FilterManager';
 import { DEFAULT_RIBBON_STATE, type RibbonState } from './ribbon';
 import type { SheetTabInfo } from './SheetTabs';
 import type { SpreadsheetIntent } from './grid/IntentHandler';
@@ -75,6 +78,10 @@ export interface SpreadsheetShellProps {
   getCellFormat?: (row: number, col: number) => Partial<CellFormat>;
   /** Format painter toggle callback */
   onFormatPainterToggle?: () => void;
+  /** Filter manager from engine (for filter UI integration) */
+  filterManager?: FilterManager;
+  /** Data store from engine (for filter UI integration) */
+  dataStore?: FilterDataStore;
 }
 
 // =============================================================================
@@ -88,6 +95,8 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   onClipboard,
   getCellFormat,
   onFormatPainterToggle,
+  filterManager,
+  dataStore,
 }) => {
   const gridRef = useRef<GridViewportHandle>(null);
   const selectionRef = useRef<SelectionState>({ activeCell: { row: 0, col: 0 }, ranges: [] });
@@ -204,33 +213,33 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
         }
 
         case 'InsertRows': {
-          const { row, count } = intent as { row: number; count: number; type: string };
+          const { row: _row, count: _count } = intent as { row: number; count: number; type: string };
           // Forward to GridViewport via its ref
           gridRef.current?.refresh();
-          console.warn(`[SpreadsheetShell] InsertRows via menu: row=${row}, count=${count}`);
+          // Engine stub — insert rows via menu
           break;
         }
 
         case 'InsertColumns': {
-          const { col, count } = intent as { col: number; count: number; type: string };
+          const { col: _col, count: _count } = intent as { col: number; count: number; type: string };
           gridRef.current?.refresh();
-          console.warn(`[SpreadsheetShell] InsertColumns via menu: col=${col}, count=${count}`);
+          // Engine stub — insert columns via menu
           break;
         }
 
         case 'DeleteRows': {
-          const { startRow, endRow } = intent as { startRow: number; endRow: number; type: string };
+          const { startRow: _startRow, endRow: _endRow } = intent as { startRow: number; endRow: number; type: string };
           gridRef.current?.refresh();
           refreshRibbonFormat();
-          console.warn(`[SpreadsheetShell] DeleteRows via menu: startRow=${startRow}, endRow=${endRow}`);
+          // Engine stub — delete rows via menu
           break;
         }
 
         case 'DeleteColumns': {
-          const { startCol, endCol } = intent as { startCol: number; endCol: number; type: string };
+          const { startCol: _startCol, endCol: _endCol } = intent as { startCol: number; endCol: number; type: string };
           gridRef.current?.refresh();
           refreshRibbonFormat();
-          console.warn(`[SpreadsheetShell] DeleteColumns via menu: startCol=${startCol}, endCol=${endCol}`);
+          // Engine stub — delete columns via menu
           break;
         }
 
@@ -323,43 +332,42 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   // Grid Context Menu Callbacks
   // =========================================================================
 
-  const handleInsertRows = useCallback((row: number, count: number) => {
-    // Engine stub — insert rows not yet implemented
-    console.warn(`[SpreadsheetShell] InsertRows: row=${row}, count=${count} (engine stub)`);
+  const handleInsertRows = useCallback((_row: number, _count: number) => {
+    // Engine stub — insert rows from context menu
     gridRef.current?.refresh();
   }, []);
 
-  const handleDeleteRows = useCallback((startRow: number, endRow: number) => {
-    console.warn(`[SpreadsheetShell] DeleteRows: startRow=${startRow}, endRow=${endRow} (engine stub)`);
+  const handleDeleteRows = useCallback((_startRow: number, _endRow: number) => {
+    // Engine stub — delete rows from context menu
     gridRef.current?.refresh();
   }, []);
 
-  const handleInsertColumns = useCallback((col: number, count: number) => {
-    console.warn(`[SpreadsheetShell] InsertColumns: col=${col}, count=${count} (engine stub)`);
+  const handleInsertColumns = useCallback((_col: number, _count: number) => {
+    // Engine stub — insert columns from context menu
     gridRef.current?.refresh();
   }, []);
 
-  const handleDeleteColumns = useCallback((startCol: number, endCol: number) => {
-    console.warn(`[SpreadsheetShell] DeleteColumns: startCol=${startCol}, endCol=${endCol} (engine stub)`);
+  const handleDeleteColumns = useCallback((_startCol: number, _endCol: number) => {
+    // Engine stub — delete columns from context menu
     gridRef.current?.refresh();
   }, []);
 
   const handleMergeCells = useCallback(() => {
-    console.warn('[SpreadsheetShell] MergeCells (engine stub)');
+    // Engine stub — merge cells
     gridRef.current?.refresh();
   }, []);
 
   const handleUnmergeCells = useCallback(() => {
-    console.warn('[SpreadsheetShell] UnmergeCells (engine stub)');
+    // Engine stub — unmerge cells
     gridRef.current?.refresh();
   }, []);
 
   const handleShowFormatDialog = useCallback(() => {
-    console.warn('[SpreadsheetShell] ShowFormatDialog (engine stub)');
+    // Engine stub — show format dialog
   }, []);
 
   const handleDeleteContents = useCallback(() => {
-    console.warn('[SpreadsheetShell] DeleteContents (engine stub)');
+    // Engine stub — delete cell contents
     gridRef.current?.refresh();
     refreshRibbonFormat();
   }, [refreshRibbonFormat]);
@@ -413,7 +421,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   const handleOpenFindReplace = useCallback((mode: 'find' | 'replace') => {
     // Mutual exclusion: close other panels
     setSortDialogOpen(false);
-    setFilterDropdownOpen(false);
+    filterState?.closeFilter();
     setValidationDialogOpen(false);
     setShortcutsDialogOpen(false);
     setFindReplaceMode(mode);
@@ -428,9 +436,8 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     gridRef.current?.focus();
   }, []);
 
-  const handleFind = useCallback((query: string, options: FindOptions) => {
-    // Engine stub — FindReplace module not yet wired
-    console.warn(`[SpreadsheetShell] Find: query="${query}", options=`, options, '(engine stub)');
+  const handleFind = useCallback((_query: string, _options: FindOptions) => {
+    // Engine stub — find operation
     // Future: const result = engine.findReplace.findAll(query, options);
     // setFindMatchCount(result.count);
     // setFindCurrentIndex(result.count > 0 ? 0 : -1);
@@ -439,27 +446,27 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   }, []);
 
   const handleFindNext = useCallback(() => {
-    console.warn('[SpreadsheetShell] FindNext (engine stub)');
+    // Engine stub — find next match
     // Future: const match = engine.findReplace.findNext();
     // if (match) gridRef.current?.scrollToCell(match.cell.row, match.cell.col);
     // setFindCurrentIndex(engine.findReplace.getState().currentIndex);
   }, []);
 
   const handleFindPrevious = useCallback(() => {
-    console.warn('[SpreadsheetShell] FindPrevious (engine stub)');
+    // Engine stub — find previous match
     // Future: const match = engine.findReplace.findPrevious();
     // if (match) gridRef.current?.scrollToCell(match.cell.row, match.cell.col);
     // setFindCurrentIndex(engine.findReplace.getState().currentIndex);
   }, []);
 
-  const handleReplaceCurrent = useCallback((value: string) => {
-    console.warn(`[SpreadsheetShell] ReplaceCurrent: value="${value}" (engine stub)`);
+  const handleReplaceCurrent = useCallback((_value: string) => {
+    // Engine stub — replace current match
     // Future: engine.findReplace.replaceCurrent(value);
     // gridRef.current?.refresh();
   }, []);
 
-  const handleReplaceAll = useCallback((query: string, _options: FindOptions, value: string) => {
-    console.warn(`[SpreadsheetShell] ReplaceAll: query="${query}", value="${value}" (engine stub)`);
+  const handleReplaceAll = useCallback((_query: string, _options: FindOptions, _value: string) => {
+    // Engine stub — replace all matches
     // Future: const result = engine.findReplace.replaceAll(query, _options, value);
     // gridRef.current?.refresh();
     // setFindMatchCount(0);
@@ -477,7 +484,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     gridRef.current?.focus();
     // Mutual exclusion: close other panels
     setFindReplaceOpen(false);
-    setFilterDropdownOpen(false);
+    filterState?.closeFilter();
     setValidationDialogOpen(false);
     setShortcutsDialogOpen(false);
     setSortDialogOpen(true);
@@ -488,8 +495,8 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     gridRef.current?.focus();
   }, []);
 
-  const handleApplySort = useCallback((rules: SortRule[], hasHeader: boolean) => {
-    console.warn(`[SpreadsheetShell] Sort: rules=`, rules, `hasHeader=${hasHeader} (engine stub)`);
+  const handleApplySort = useCallback((_rules: SortRule[], _hasHeader: boolean) => {
+    // Engine stub — apply sort
     setSortDialogOpen(false);
     gridRef.current?.refresh();
     gridRef.current?.focus();
@@ -497,12 +504,13 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   }, [toast]);
 
   // =========================================================================
-  // Filter Dropdown State & Callbacks
+  // Filter State Integration
   // =========================================================================
 
-  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
-  const [filterColumn, setFilterColumn] = useState(0);
-  const [filterAnchorRect, setFilterAnchorRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  // Integrate useFilterState if engine props provided, otherwise use stubs
+  const filterState = filterManager && dataStore
+    ? useFilterState({ filterManager, dataStore })
+    : null;
 
   const handleOpenFilterDropdown = useCallback((column: number, anchorRect: { x: number; y: number; width: number; height: number }) => {
     // Flush any active cell edit (focus grid → blur editor → confirmEdit)
@@ -512,30 +520,43 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     setSortDialogOpen(false);
     setValidationDialogOpen(false);
     setShortcutsDialogOpen(false);
-    setFilterColumn(column);
-    setFilterAnchorRect(anchorRect);
-    setFilterDropdownOpen(true);
-  }, []);
+
+    if (filterState) {
+      // Use real filter state
+      filterState.openFilter(column, new DOMRect(anchorRect.x, anchorRect.y, anchorRect.width, anchorRect.height));
+    }
+  }, [filterState]);
 
   const handleCloseFilterDropdown = useCallback(() => {
-    setFilterDropdownOpen(false);
+    if (filterState) {
+      filterState.closeFilter();
+    }
     gridRef.current?.focus();
-  }, []);
+  }, [filterState]);
 
   const handleApplyFilter = useCallback((column: number, selectedValues: Set<string>, includeBlanks: boolean) => {
-    console.warn(`[SpreadsheetShell] ApplyFilter: column=${column}, values=${selectedValues.size}, includeBlanks=${includeBlanks} (engine stub)`);
-    setFilterDropdownOpen(false);
-    gridRef.current?.refresh();
-    gridRef.current?.focus();
-    toast('Filter applied', 'success');
-  }, [toast]);
+    if (filterState) {
+      try {
+        // Use real filter state
+        filterState.applyFilter(column, selectedValues, includeBlanks);
+        gridRef.current?.refresh();
+        gridRef.current?.focus();
+        toast('Filter applied', 'success');
+      } catch (error) {
+        console.error('Failed to apply filter:', error);
+        toast('Failed to apply filter', 'error');
+      }
+    }
+  }, [filterState, toast]);
 
   const handleClearFilter = useCallback((column: number) => {
-    console.warn(`[SpreadsheetShell] ClearFilter: column=${column} (engine stub)`);
-    setFilterDropdownOpen(false);
-    gridRef.current?.refresh();
-    gridRef.current?.focus();
-  }, []);
+    if (filterState) {
+      // Use real filter state
+      filterState.clearFilter(column);
+      gridRef.current?.refresh();
+      gridRef.current?.focus();
+    }
+  }, [filterState]);
 
   // =========================================================================
   // Data Validation Dialog State & Callbacks
@@ -549,7 +570,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     // Mutual exclusion: close other panels
     setFindReplaceOpen(false);
     setSortDialogOpen(false);
-    setFilterDropdownOpen(false);
+    filterState?.closeFilter();
     setShortcutsDialogOpen(false);
     setValidationDialogOpen(true);
   }, []);
@@ -559,14 +580,14 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
     gridRef.current?.focus();
   }, []);
 
-  const handleApplyValidation = useCallback((rule: ValidationRuleConfig) => {
-    console.warn(`[SpreadsheetShell] ApplyValidation: type=${rule.type} (engine stub)`, rule);
+  const handleApplyValidation = useCallback((_rule: ValidationRuleConfig) => {
+    // Engine stub — apply data validation
     setValidationDialogOpen(false);
     gridRef.current?.focus();
   }, []);
 
   const handleRemoveValidation = useCallback(() => {
-    console.warn('[SpreadsheetShell] RemoveValidation (engine stub)');
+    // Engine stub — remove data validation
     setValidationDialogOpen(false);
     gridRef.current?.focus();
   }, []);
@@ -589,7 +610,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
         // Mutual exclusion
         setFindReplaceOpen(false);
         setSortDialogOpen(false);
-        setFilterDropdownOpen(false);
+        filterState?.closeFilter();
         setValidationDialogOpen(false);
         setShortcutsDialogOpen((prev) => !prev);
         return;
@@ -657,6 +678,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
           onOpenFindReplace={handleOpenFindReplace}
           onOpenSortDialog={handleOpenSortDialog}
           onOpenFilterDropdown={handleOpenFilterDropdown}
+          isColumnFiltered={filterState?.isColumnFiltered}
           onOpenDataValidation={handleOpenDataValidation}
         />
       </main>
@@ -685,17 +707,41 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
       />
 
       {/* Filter Dropdown */}
-      <FilterDropdown
-        isOpen={filterDropdownOpen}
-        column={filterColumn}
-        anchorRect={filterAnchorRect}
-        columnName={columnIndexToName(filterColumn)}
-        uniqueValues={[]}
-        currentFilter={null}
-        onApply={handleApplyFilter}
-        onClear={handleClearFilter}
-        onClose={handleCloseFilterDropdown}
-      />
+      {filterState?.dropdownState.isOpen && filterState.dropdownState.column !== null && (
+        <FilterDropdown
+          isOpen={filterState.dropdownState.isOpen}
+          column={filterState.dropdownState.column}
+          anchorRect={{
+            x: filterState.dropdownState.anchorRect?.x ?? 0,
+            y: filterState.dropdownState.anchorRect?.y ?? 0,
+            width: filterState.dropdownState.anchorRect?.width ?? 0,
+            height: filterState.dropdownState.anchorRect?.height ?? 0,
+          }}
+          columnName={columnIndexToName(filterState.dropdownState.column)}
+          uniqueValues={filterState.getUniqueValues(filterState.dropdownState.column)}
+          currentFilter={(() => {
+            const predicate = filterState.activeFilters.get(filterState.dropdownState.column!);
+            const valueSet = predicateToValueSet(predicate);
+            if (!valueSet) return null;
+
+            // CRITICAL: Add empty string to Set if blanks should be included
+            // FilterDropdown checks currentFilter.has('') to determine blanks checkbox state
+            if (valueSet.includeBlanks) {
+              const result = new Set(valueSet.values);
+              result.add('');
+              return result;
+            }
+            return valueSet.values;
+          })()}
+          onApply={(col, values, blanks) => {
+            handleApplyFilter(col, values, blanks);
+          }}
+          onClear={(col) => {
+            handleClearFilter(col);
+          }}
+          onClose={handleCloseFilterDropdown}
+        />
+      )}
 
       {/* Data Validation Dialog */}
       <DataValidationDialog

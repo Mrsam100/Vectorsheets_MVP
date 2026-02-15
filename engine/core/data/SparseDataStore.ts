@@ -260,6 +260,288 @@ export class SparseDataStore {
   }
 
   // ===========================================================================
+  // Row/Column Structural Operations
+  // ===========================================================================
+
+  /**
+   * Insert rows at a specific position
+   * All cells at row >= insertRow move down by count
+   *
+   * @param insertRow - Row index where rows are inserted (0-based)
+   * @param count - Number of rows to insert
+   *
+   * @example
+   * // Insert 2 rows at row 5
+   * dataStore.insertRows(5, 2);
+   * // Cell at row 5 moves to row 7
+   * // Cell at row 6 moves to row 8
+   */
+  insertRows(insertRow: number, count: number): void {
+    if (count <= 0) return;
+    if (insertRow < 0 || insertRow >= MAX_ROWS) {
+      throw new Error(`Invalid insertRow: ${insertRow}`);
+    }
+
+    // Collect cells that need to move (in reverse order to avoid conflicts)
+    const cellsToMove: Array<{ oldRow: number; col: number; cell: Cell }> = [];
+
+    for (const [key, cell] of this.cells) {
+      const { row, col } = parseKey(key);
+      if (row >= insertRow) {
+        cellsToMove.push({ oldRow: row, col, cell });
+      }
+    }
+
+    // Sort by row descending to move from bottom to top
+    cellsToMove.sort((a, b) => b.oldRow - a.oldRow);
+
+    // Delete old cells and insert at new positions
+    for (const { oldRow, col, cell } of cellsToMove) {
+      this.deleteCell(oldRow, col);
+      const newRow = oldRow + count;
+      if (newRow < MAX_ROWS) {
+        this.setCell(newRow, col, cell);
+      }
+    }
+
+    // Move row info (heights, hidden state)
+    const rowInfoToMove: Array<{ oldRow: number; info: RowInfo }> = [];
+    for (const [row, info] of this.rowInfo) {
+      if (row >= insertRow) {
+        rowInfoToMove.push({ oldRow: row, info });
+      }
+    }
+
+    rowInfoToMove.sort((a, b) => b.oldRow - a.oldRow);
+
+    for (const { oldRow, info } of rowInfoToMove) {
+      this.rowInfo.delete(oldRow);
+      const newRow = oldRow + count;
+      if (newRow < MAX_ROWS) {
+        this.rowInfo.set(newRow, info);
+      }
+    }
+
+    this._boundsDirty = true;
+  }
+
+  /**
+   * Delete rows at a specific position
+   * Cells in deleted rows are permanently removed
+   * Cells below deleted rows move up
+   *
+   * @param deleteRow - Row index where deletion starts (0-based)
+   * @param count - Number of rows to delete
+   *
+   * @example
+   * // Delete rows 5-7 (3 rows)
+   * dataStore.deleteRows(5, 3);
+   * // Cells at rows 5-7 are deleted
+   * // Cell at row 8 moves to row 5
+   */
+  deleteRows(deleteRow: number, count: number): void {
+    if (count <= 0) return;
+    if (deleteRow < 0 || deleteRow >= MAX_ROWS) {
+      throw new Error(`Invalid deleteRow: ${deleteRow}`);
+    }
+
+    const deleteEnd = deleteRow + count;
+
+    // Collect cells to delete and cells to move
+    const cellsToDelete: Array<{ row: number; col: number }> = [];
+    const cellsToMove: Array<{ oldRow: number; col: number; cell: Cell }> = [];
+
+    for (const [key, cell] of this.cells) {
+      const { row, col } = parseKey(key);
+
+      if (row >= deleteRow && row < deleteEnd) {
+        // Cell is in deleted range
+        cellsToDelete.push({ row, col });
+      } else if (row >= deleteEnd) {
+        // Cell is below deleted range, needs to move up
+        cellsToMove.push({ oldRow: row, col, cell });
+      }
+    }
+
+    // Delete cells in the deleted range
+    for (const { row, col } of cellsToDelete) {
+      this.deleteCell(row, col);
+    }
+
+    // Move cells up
+    cellsToMove.sort((a, b) => a.oldRow - b.oldRow); // Top to bottom
+
+    for (const { oldRow, col, cell } of cellsToMove) {
+      this.deleteCell(oldRow, col);
+      const newRow = oldRow - count;
+      if (newRow >= 0) {
+        this.setCell(newRow, col, cell);
+      }
+    }
+
+    // Handle row info
+    const rowInfoToDelete: number[] = [];
+    const rowInfoToMove: Array<{ oldRow: number; info: RowInfo }> = [];
+
+    for (const [row, info] of this.rowInfo) {
+      if (row >= deleteRow && row < deleteEnd) {
+        rowInfoToDelete.push(row);
+      } else if (row >= deleteEnd) {
+        rowInfoToMove.push({ oldRow: row, info });
+      }
+    }
+
+    for (const row of rowInfoToDelete) {
+      this.rowInfo.delete(row);
+    }
+
+    rowInfoToMove.sort((a, b) => a.oldRow - b.oldRow);
+
+    for (const { oldRow, info } of rowInfoToMove) {
+      this.rowInfo.delete(oldRow);
+      const newRow = oldRow - count;
+      if (newRow >= 0) {
+        this.rowInfo.set(newRow, info);
+      }
+    }
+
+    this._boundsDirty = true;
+  }
+
+  /**
+   * Insert columns at a specific position
+   * All cells at col >= insertCol move right by count
+   *
+   * @param insertCol - Column index where columns are inserted (0-based)
+   * @param count - Number of columns to insert
+   */
+  insertColumns(insertCol: number, count: number): void {
+    if (count <= 0) return;
+    if (insertCol < 0 || insertCol >= MAX_COLS) {
+      throw new Error(`Invalid insertCol: ${insertCol}`);
+    }
+
+    // Collect cells that need to move (in reverse order to avoid conflicts)
+    const cellsToMove: Array<{ row: number; oldCol: number; cell: Cell }> = [];
+
+    for (const [key, cell] of this.cells) {
+      const { row, col } = parseKey(key);
+      if (col >= insertCol) {
+        cellsToMove.push({ row, oldCol: col, cell });
+      }
+    }
+
+    // Sort by col descending to move from right to left
+    cellsToMove.sort((a, b) => b.oldCol - a.oldCol);
+
+    // Delete old cells and insert at new positions
+    for (const { row, oldCol, cell } of cellsToMove) {
+      this.deleteCell(row, oldCol);
+      const newCol = oldCol + count;
+      if (newCol < MAX_COLS) {
+        this.setCell(row, newCol, cell);
+      }
+    }
+
+    // Move column info (widths, hidden state)
+    const colInfoToMove: Array<{ oldCol: number; info: ColumnInfo }> = [];
+    for (const [col, info] of this.colInfo) {
+      if (col >= insertCol) {
+        colInfoToMove.push({ oldCol: col, info });
+      }
+    }
+
+    colInfoToMove.sort((a, b) => b.oldCol - a.oldCol);
+
+    for (const { oldCol, info } of colInfoToMove) {
+      this.colInfo.delete(oldCol);
+      const newCol = oldCol + count;
+      if (newCol < MAX_COLS) {
+        this.colInfo.set(newCol, info);
+      }
+    }
+
+    this._boundsDirty = true;
+  }
+
+  /**
+   * Delete columns at a specific position
+   * Cells in deleted columns are permanently removed
+   * Cells to the right of deleted columns move left
+   *
+   * @param deleteCol - Column index where deletion starts (0-based)
+   * @param count - Number of columns to delete
+   */
+  deleteColumns(deleteCol: number, count: number): void {
+    if (count <= 0) return;
+    if (deleteCol < 0 || deleteCol >= MAX_COLS) {
+      throw new Error(`Invalid deleteCol: ${deleteCol}`);
+    }
+
+    const deleteEnd = deleteCol + count;
+
+    // Collect cells to delete and cells to move
+    const cellsToDelete: Array<{ row: number; col: number }> = [];
+    const cellsToMove: Array<{ row: number; oldCol: number; cell: Cell }> = [];
+
+    for (const [key, cell] of this.cells) {
+      const { row, col } = parseKey(key);
+
+      if (col >= deleteCol && col < deleteEnd) {
+        // Cell is in deleted range
+        cellsToDelete.push({ row, col });
+      } else if (col >= deleteEnd) {
+        // Cell is to the right of deleted range, needs to move left
+        cellsToMove.push({ row, oldCol: col, cell });
+      }
+    }
+
+    // Delete cells in the deleted range
+    for (const { row, col } of cellsToDelete) {
+      this.deleteCell(row, col);
+    }
+
+    // Move cells left
+    cellsToMove.sort((a, b) => a.oldCol - b.oldCol); // Left to right
+
+    for (const { row, oldCol, cell } of cellsToMove) {
+      this.deleteCell(row, oldCol);
+      const newCol = oldCol - count;
+      if (newCol >= 0) {
+        this.setCell(row, newCol, cell);
+      }
+    }
+
+    // Handle column info
+    const colInfoToDelete: number[] = [];
+    const colInfoToMove: Array<{ oldCol: number; info: ColumnInfo }> = [];
+
+    for (const [col, info] of this.colInfo) {
+      if (col >= deleteCol && col < deleteEnd) {
+        colInfoToDelete.push(col);
+      } else if (col >= deleteEnd) {
+        colInfoToMove.push({ oldCol: col, info });
+      }
+    }
+
+    for (const col of colInfoToDelete) {
+      this.colInfo.delete(col);
+    }
+
+    colInfoToMove.sort((a, b) => a.oldCol - b.oldCol);
+
+    for (const { oldCol, info } of colInfoToMove) {
+      this.colInfo.delete(oldCol);
+      const newCol = oldCol - count;
+      if (newCol >= 0) {
+        this.colInfo.set(newCol, info);
+      }
+    }
+
+    this._boundsDirty = true;
+  }
+
+  // ===========================================================================
   // Row/Column Info
   // ===========================================================================
 

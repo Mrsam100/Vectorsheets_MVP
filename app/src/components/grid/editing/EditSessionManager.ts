@@ -183,11 +183,7 @@ export class EditSessionManager {
 
     // TODO (Phase 3): When character-level formatting is implemented,
     // apply format to current selection range instead of entire cell.
-    // Example:
-    // if (this.session.selection) {
-    //   const [start, end] = this.session.selection;
-    //   this.applyFormatToRange(start, end, format);
-    // }
+    // See the "Future: Character-Level Formatting (Phase 3)" section at the end of the class.
   }
 
   /**
@@ -244,44 +240,13 @@ export class EditSessionManager {
   // ===========================================================================
   // Future: Character-Level Formatting (Phase 3)
   // ===========================================================================
-
-  /**
-   * Apply format to a specific text range (character-level)
-   * NOT IMPLEMENTED YET - Placeholder for Phase 3
-   */
-  // @ts-expect-error - Placeholder method for future implementation
-  private _applyFormatToRange(
-    _start: number,
-    _end: number,
-    _format: Partial<CellFormat>
-  ): void {
-    // Phase 3 implementation:
-    // 1. Split/merge existing FormatRuns
-    // 2. Apply format to specified range
-    // 3. Optimize adjacent runs with identical formats
-    // 4. Update session.runs array
-    throw new Error('Character-level formatting not yet implemented (Phase 3)');
-  }
-
-  /**
-   * Convert session to FormattedText (future)
-   * NOT IMPLEMENTED YET - Placeholder for Phase 3
-   */
-  toFormattedText(): FormattedText {
-    // Phase 3 implementation:
-    // Return { text: session.text, runs: session.runs }
-    throw new Error('FormattedText conversion not yet implemented (Phase 3)');
-  }
-
-  /**
-   * Load FormattedText into session (future)
-   * NOT IMPLEMENTED YET - Placeholder for Phase 3
-   */
-  fromFormattedText(_formatted: FormattedText): void {
-    // Phase 3 implementation:
-    // Parse runs and populate session state
-    throw new Error('FormattedText loading not yet implemented (Phase 3)');
-  }
+  // Phase 3 implementation will include:
+  // 1. applyFormatToRange(start, end, format) - Apply format to specific text range
+  //    - Split/merge existing FormatRuns
+  //    - Optimize adjacent runs with identical formats
+  //    - Update session.runs array
+  // 2. toFormattedText() - Convert session to FormattedText with character formatting
+  // 3. fromFormattedText(formatted) - Load FormattedText into session
 }
 
 // =============================================================================

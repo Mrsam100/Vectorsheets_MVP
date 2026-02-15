@@ -43,11 +43,13 @@ import React, {
   useCallback,
   useState,
   memo,
+  useSyncExternalStore,
 } from 'react';
 import type { EditModeState, EditModeActions } from './useEditMode';
 import { useFormulaAutoComplete } from './useFormulaAutoComplete';
 import type { AcceptResult } from './useFormulaAutoComplete';
 import { FormulaHintsPanel } from './FormulaHintsPanel';
+import type { EditModeManager } from '../../../../../engine/core/editing/EditModeManager';
 
 // =============================================================================
 // Constants
@@ -60,25 +62,19 @@ const POINT_MODE_TRIGGERS = new Set([
   '=', '+', '-', '*', '/', '(', ',', ':', '^', '&', '<', '>', ';'
 ]);
 
-/**
- * Maximum undo history entries during edit
- */
-const MAX_EDIT_HISTORY = 100;
-
-/**
- * Debounce delay for adding to undo history (ms)
- */
-const UNDO_DEBOUNCE_MS = 300;
+// REMOVED: MAX_EDIT_HISTORY, UNDO_DEBOUNCE_MS - no longer needed (no internal undo/redo)
 
 // =============================================================================
 // Types
 // =============================================================================
 
 export interface CellEditorOverlayProps {
-  /** Edit state from useEditMode hook */
+  /** Edit state from useEditMode hook (legacy, will be replaced by EditSession) */
   state: EditModeState;
   /** Edit actions from useEditMode hook */
   actions: EditModeActions;
+  /** EditModeManager instance for EditSession subscription (optional for migration) */
+  manager?: EditModeManager;
   /** Cell position in pixels (relative to scroll container) */
   cellPosition: { x: number; y: number; width: number; height: number };
   /** Minimum width for the editor */
@@ -109,14 +105,7 @@ export interface CellEditorOverlayProps {
   keyboardHeight?: number;
 }
 
-/**
- * Internal history entry for undo/redo during edit
- */
-interface EditHistoryEntry {
-  value: string;
-  cursorPosition: number;
-  selection: { start: number; end: number } | null;
-}
+// REMOVED: EditHistoryEntry interface - no longer needed (no internal undo/redo)
 
 // =============================================================================
 // Styles (injected once)
@@ -125,134 +114,10 @@ interface EditHistoryEntry {
 // Editor styles (caret, selection, focus pulse) moved to index.css — themed via CSS custom properties
 
 // =============================================================================
-// Hooks
+// REMOVED: useEditHistory hook
 // =============================================================================
-
-/**
- * Internal undo/redo history for edit session
- */
-function useEditHistory(initialValue: string, enabled: boolean) {
-  const [history, setHistory] = useState<EditHistoryEntry[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const lastValueRef = useRef(initialValue);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Capture initial value at edit start (ref avoids resetting on every keystroke)
-  const initialValueRef = useRef(initialValue);
-
-  // Use refs to avoid stale closures in callbacks
-  const historyRef = useRef(history);
-  const historyIndexRef = useRef(historyIndex);
-  historyRef.current = history;
-  historyIndexRef.current = historyIndex;
-
-  // Reset history only when editing starts/stops (NOT on every value change)
-  useEffect(() => {
-    if (enabled) {
-      // Capture initial value at the moment editing starts
-      const startValue = initialValueRef.current;
-      const initialEntry = {
-        value: startValue,
-        cursorPosition: startValue.length,
-        selection: null,
-      };
-      setHistory([initialEntry]);
-      setHistoryIndex(0);
-      lastValueRef.current = startValue;
-      historyRef.current = [initialEntry];
-      historyIndexRef.current = 0;
-    }
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    };
-  }, [enabled]); // Removed initialValue from deps — only reset on edit start/stop
-
-  // Keep the ref updated for when the next edit session starts
-  if (!enabled) {
-    initialValueRef.current = initialValue;
-  }
-
-  const pushHistory = useCallback((entry: EditHistoryEntry) => {
-    if (!enabled) return;
-
-    // Debounce rapid changes
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
-
-      // Skip if value unchanged
-      if (entry.value === lastValueRef.current) return;
-      lastValueRef.current = entry.value;
-
-      // Use refs to get current values (avoid stale closure)
-      const currentIndex = historyIndexRef.current;
-
-      setHistory((prev) => {
-        // Truncate future history if we're not at the end
-        const newHistory = prev.slice(0, currentIndex + 1);
-        newHistory.push(entry);
-
-        // Limit history size
-        if (newHistory.length > MAX_EDIT_HISTORY) {
-          newHistory.shift();
-        }
-
-        historyRef.current = newHistory;
-        return newHistory;
-      });
-      setHistoryIndex((prev) => {
-        const newIndex = Math.min(prev + 1, MAX_EDIT_HISTORY - 1);
-        historyIndexRef.current = newIndex;
-        return newIndex;
-      });
-    }, UNDO_DEBOUNCE_MS);
-  }, [enabled]);
-
-  const undo = useCallback((): EditHistoryEntry | null => {
-    const currentIndex = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-
-    if (!enabled || currentIndex <= 0) return null;
-
-    const newIndex = currentIndex - 1;
-    const entry = currentHistory[newIndex];
-    if (!entry) return null; // Safety check
-
-    setHistoryIndex(newIndex);
-    historyIndexRef.current = newIndex;
-    lastValueRef.current = entry.value;
-    return entry;
-  }, [enabled]);
-
-  const redo = useCallback((): EditHistoryEntry | null => {
-    const currentIndex = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-
-    if (!enabled || currentIndex >= currentHistory.length - 1) return null;
-
-    const newIndex = currentIndex + 1;
-    const entry = currentHistory[newIndex];
-    if (!entry) return null; // Safety check
-
-    setHistoryIndex(newIndex);
-    historyIndexRef.current = newIndex;
-    lastValueRef.current = entry.value;
-    return entry;
-  }, [enabled]);
-
-  return {
-    pushHistory,
-    undo,
-    redo,
-    canUndo: historyIndex > 0,
-    canRedo: historyIndex < history.length - 1
-  };
-}
+// Internal undo/redo has been removed - use browser's native undo/redo instead.
+// EditSession in EditModeManager now tracks isDirty state.
 
 // =============================================================================
 // Component
@@ -261,6 +126,7 @@ function useEditHistory(initialValue: string, enabled: boolean) {
 export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   state,
   actions,
+  manager,
   cellPosition,
   minWidth = 50,
   maxWidth = 0,
@@ -276,29 +142,44 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   isMergedCell = false,
   keyboardHeight = 0,
 }) => {
-  // Editor styles now in index.css (themed)
+  // =============================================================================
+  // EditSession Subscription (New Pattern - React 18)
+  // =============================================================================
+
+  // Subscribe to EditSession from EditModeManager (single source of truth)
+  const editSession = useSyncExternalStore(
+    manager?.subscribe ?? (() => () => {}), // Subscribe function
+    manager?.getSnapshot ?? (() => null)     // Get current snapshot
+  );
+
+  // TODO: Use editSession for composition state, cursor sync, and dirty tracking
+  // For now, just ensure it's available for future use
+  void editSession;
+
+  // =============================================================================
+  // Refs and Local State
+  // =============================================================================
 
   const inputRef = useRef<HTMLInputElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const timeoutRefs = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const [inputWidth, setInputWidth] = useState(cellPosition.width);
-  const isComposingRef = useRef(false);
   const selectionBeforeResizeRef = useRef<{ start: number; end: number } | null>(null);
   const cursorSyncRafRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const hasCommittedRef = useRef(false);
   const lastModeCycleRef = useRef(0);
 
+  // IME composition tracking (TODO: migrate to EditSession.isComposing)
+  const isComposingRef = useRef(false);
+
   // Ref for state to avoid stale closures in stable callbacks
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Internal undo/redo history
-  const { pushHistory, undo, redo, canUndo, canRedo } = useEditHistory(
-    state.value,
-    state.isEditing
-  );
+  // REMOVED: useEditHistory hook - EditSession now tracks isDirty
+  // NOTE: Internal undo/redo removed - use browser's native undo/redo (Ctrl+Z/Ctrl+Y)
 
   // Formula auto-complete
   const handleAutoCompleteAccept = useCallback((result: AcceptResult) => {
@@ -383,8 +264,8 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
   }, [state.isEditing, isActive]);
 
   // Request scroll-into-view when editor might be off-screen
-  // Debounced with rAF to prevent layout thrashing during rapid position
-  // changes (auto-scroll, zoom, resize)
+  // PERFORMANCE: Only check on edit start (state.isEditing change), not on every cursor move
+  // Removed cellPosition from deps to avoid getBoundingClientRect() in hot path (60+ calls/sec)
   useEffect(() => {
     if (state.isEditing && onScrollIntoView && containerRef.current) {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
@@ -419,47 +300,56 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         scrollRafRef.current = null;
       }
     };
-  }, [state.isEditing, cellPosition, inputWidth, onScrollIntoView, keyboardHeight]);
+  }, [state.isEditing, onScrollIntoView, keyboardHeight]); // cellPosition removed - only scroll check on edit start
 
   // Measure text and adjust width (preserving selection)
+  // PERFORMANCE: Debounced to 50ms to avoid offsetWidth reads on every keystroke
   useEffect(() => {
     if (measureRef.current) {
-      // Save selection before resize
-      if (inputRef.current) {
-        selectionBeforeResizeRef.current = {
-          start: inputRef.current.selectionStart ?? 0,
-          end: inputRef.current.selectionEnd ?? 0,
-        };
-      }
+      const measureWidth = () => {
+        if (!measureRef.current) return;
 
-      const measuredWidth = measureRef.current.offsetWidth;
-      const padding = 8;
-      const scaledPadding = padding * zoom;
-      const newWidth = Math.max(
-        minWidth * zoom,
-        cellPosition.width,
-        measuredWidth + scaledPadding
-      );
+        // Save selection before resize
+        if (inputRef.current) {
+          selectionBeforeResizeRef.current = {
+            start: inputRef.current.selectionStart ?? 0,
+            end: inputRef.current.selectionEnd ?? 0,
+          };
+        }
 
-      const finalWidth = maxWidth > 0 ? Math.min(newWidth, maxWidth * zoom) : newWidth;
+        const measuredWidth = measureRef.current.offsetWidth;
+        const padding = 8;
+        const scaledPadding = padding * zoom;
+        const newWidth = Math.max(
+          minWidth * zoom,
+          cellPosition.width,
+          measuredWidth + scaledPadding
+        );
 
-      if (finalWidth !== inputWidth) {
-        setInputWidth(finalWidth);
+        const finalWidth = maxWidth > 0 ? Math.min(newWidth, maxWidth * zoom) : newWidth;
 
-        // Restore selection after resize
-        safeTimeout(() => {
-          if (inputRef.current && selectionBeforeResizeRef.current) {
-            inputRef.current.setSelectionRange(
-              selectionBeforeResizeRef.current.start,
-              selectionBeforeResizeRef.current.end
-            );
-          }
-        }, 0);
-      }
+        if (finalWidth !== inputWidth) {
+          setInputWidth(finalWidth);
+
+          // Restore selection after resize
+          safeTimeout(() => {
+            if (inputRef.current && selectionBeforeResizeRef.current) {
+              inputRef.current.setSelectionRange(
+                selectionBeforeResizeRef.current.start,
+                selectionBeforeResizeRef.current.end
+              );
+            }
+          }, 0);
+        }
+      };
+
+      // Debounce measurement to max 20Hz (50ms) to reduce layout reads
+      const timeoutId = setTimeout(measureWidth, 50);
+      return () => clearTimeout(timeoutId);
     }
   }, [state.value, cellPosition.width, minWidth, maxWidth, zoom, inputWidth, safeTimeout]);
 
-  // Handle input change with Point mode trigger and undo history
+  // Handle input change with Point mode trigger
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (isComposingRef.current) return;
 
@@ -469,14 +359,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
 
     actions.setValue(newValue);
 
-    // Push to undo history
-    pushHistory({
-      value: newValue,
-      cursorPosition: cursorPos,
-      selection: null,
-    });
-
-    // Check for Point mode trigger
+    // Check for Point mode trigger (Excel-like formula editing)
     if (
       newValue.startsWith('=') &&
       newValue.length > oldValue.length &&
@@ -488,7 +371,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         actions.setMode('point');
       }
     }
-  }, [actions, pushHistory]);
+  }, [actions]);
 
   // IME composition handlers
   const handleCompositionStart = useCallback(() => {
@@ -499,12 +382,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
     isComposingRef.current = false;
     const value = (e.target as HTMLInputElement).value;
     actions.setValue(value);
-    pushHistory({
-      value,
-      cursorPosition: (e.target as HTMLInputElement).selectionStart ?? value.length,
-      selection: null,
-    });
-  }, [actions, pushHistory]);
+  }, [actions]);
 
   // Handle key events - uses refs for state to keep callback stable
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -694,38 +572,11 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         }
         break;
 
-      case 'z':
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          if (e.shiftKey) {
-            const entry = redo();
-            if (entry) {
-              actions.setValue(entry.value);
-              actions.setCursorPosition(entry.cursorPosition);
-            }
-          } else {
-            const entry = undo();
-            if (entry) {
-              actions.setValue(entry.value);
-              actions.setCursorPosition(entry.cursorPosition);
-            }
-          }
-        }
-        break;
-
-      case 'y':
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          const entry = redo();
-          if (entry) {
-            actions.setValue(entry.value);
-            actions.setCursorPosition(entry.cursorPosition);
-          }
-        }
-        break;
+      // REMOVED: Internal undo/redo (Ctrl+Z, Ctrl+Y) - use browser's native undo/redo instead
+      // Browser's contentEditable undo/redo will work automatically with the input element
     }
   }, [actions, onEnter, onTab, onClose, onArrowNav,
-    autoCompleteState.showSuggestions, autoCompleteActions, undo, redo]);
+    autoCompleteState.showSuggestions, autoCompleteActions]);
 
   // Sync selection changes
   const handleSelect = useCallback(() => {
@@ -779,7 +630,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
         actions.confirmEdit();
         onClose?.();
       }
-    }, 0);
+    }, 100); // 100ms delay to ensure toolbar onClick handlers fire first
   }, [actions, onClose, safeTimeout]);
 
   // Don't render if not editing
@@ -892,27 +743,7 @@ export const CellEditorOverlay: React.FC<CellEditorOverlayProps> = memo(({
           </div>
         )}
 
-        {/* Undo/Redo indicator (subtle) */}
-        {(canUndo || canRedo) && (
-          <div
-            style={{
-              position: 'absolute',
-              top: -18 * zoom,
-              right: 0,
-              fontSize: `${Math.round(9 * zoom)}px`,
-              fontFamily: 'system-ui, -apple-system, sans-serif',
-              color: 'var(--color-text-muted)',
-              backgroundColor: 'var(--color-bg-primary)',
-              padding: `${Math.round(1 * zoom)}px ${Math.round(3 * zoom)}px`,
-              borderRadius: `${Math.round(2 * zoom)}px`,
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            {canUndo && <span title="Undo: Ctrl+Z">↶</span>}
-            {canUndo && canRedo && ' '}
-            {canRedo && <span title="Redo: Ctrl+Y">↷</span>}
-          </div>
-        )}
+        {/* REMOVED: Internal undo/redo UI - use browser's native undo/redo instead */}
 
         {/* Formula auto-complete */}
         {enableAutoComplete && state.isFormula && (

@@ -31,11 +31,13 @@ import React, {
   useCallback,
   useState,
   memo,
+  useSyncExternalStore,
 } from 'react';
 import type { EditModeState, EditModeActions } from './useEditMode';
 import { useFormulaAutoComplete } from './useFormulaAutoComplete';
 import type { AcceptResult } from './useFormulaAutoComplete';
 import { FormulaHintsPanel } from './FormulaHintsPanel';
+import type { EditModeManager } from '../../../../../engine/core/editing/EditModeManager';
 
 // =============================================================================
 // Constants
@@ -49,15 +51,7 @@ const POINT_MODE_TRIGGERS = new Set([
   '=', '+', '-', '*', '/', '(', ',', ':', '^', '&', '<', '>', ';'
 ]);
 
-/**
- * Maximum undo history entries during edit
- */
-const MAX_EDIT_HISTORY = 100;
-
-/**
- * Debounce delay for adding to undo history (ms)
- */
-const UNDO_DEBOUNCE_MS = 300;
+// REMOVED: MAX_EDIT_HISTORY, UNDO_DEBOUNCE_MS - no longer needed (no internal undo/redo)
 
 // Editor styles (caret, selection) moved to index.css — themed via CSS custom properties
 
@@ -66,10 +60,12 @@ const UNDO_DEBOUNCE_MS = 300;
 // =============================================================================
 
 export interface FormulaBarProps {
-  /** Edit state from useEditMode hook */
+  /** Edit state from useEditMode hook (legacy, will be replaced by EditSession) */
   state: EditModeState;
   /** Edit actions from useEditMode hook */
   actions: EditModeActions;
+  /** EditModeManager instance for EditSession subscription (optional for migration) */
+  manager?: EditModeManager;
   /** Active cell address for name box */
   activeCellAddress: string;
   /** Active cell value (when not editing) */
@@ -111,133 +107,13 @@ export interface FunctionHint {
   activeArgumentIndex?: number;
 }
 
-/**
- * Internal history entry for undo/redo during edit
- */
-interface EditHistoryEntry {
-  value: string;
-  cursorPosition: number;
-}
+// REMOVED: EditHistoryEntry interface - no longer needed (no internal undo/redo)
 
 // =============================================================================
-// Hooks
+// REMOVED: useEditHistory hook
 // =============================================================================
-
-/**
- * Internal undo/redo history for edit session
- */
-function useEditHistory(initialValue: string, enabled: boolean) {
-  const [history, setHistory] = useState<EditHistoryEntry[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const lastValueRef = useRef(initialValue);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Use refs to avoid stale closures in callbacks
-  const historyRef = useRef(history);
-  const historyIndexRef = useRef(historyIndex);
-  historyRef.current = history;
-  historyIndexRef.current = historyIndex;
-
-  // Reset history when editing starts
-  useEffect(() => {
-    if (enabled) {
-      const initialEntry = {
-        value: initialValue,
-        cursorPosition: initialValue.length,
-      };
-      setHistory([initialEntry]);
-      setHistoryIndex(0);
-      lastValueRef.current = initialValue;
-      historyRef.current = [initialEntry];
-      historyIndexRef.current = 0;
-    }
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    };
-  }, [enabled, initialValue]);
-
-  const pushHistory = useCallback((entry: EditHistoryEntry) => {
-    if (!enabled) return;
-
-    // Debounce rapid changes
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
-
-      // Skip if value unchanged
-      if (entry.value === lastValueRef.current) return;
-      lastValueRef.current = entry.value;
-
-      // Use refs to get current values (avoid stale closure)
-      const currentIndex = historyIndexRef.current;
-
-      setHistory((prev) => {
-        // Truncate future history if we're not at the end
-        const newHistory = prev.slice(0, currentIndex + 1);
-        newHistory.push(entry);
-
-        // Limit history size
-        if (newHistory.length > MAX_EDIT_HISTORY) {
-          newHistory.shift();
-        }
-
-        historyRef.current = newHistory;
-        return newHistory;
-      });
-      setHistoryIndex((prev) => {
-        const newIndex = Math.min(prev + 1, MAX_EDIT_HISTORY - 1);
-        historyIndexRef.current = newIndex;
-        return newIndex;
-      });
-    }, UNDO_DEBOUNCE_MS);
-  }, [enabled]);
-
-  const undo = useCallback((): EditHistoryEntry | null => {
-    const currentIndex = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-
-    if (!enabled || currentIndex <= 0) return null;
-
-    const newIndex = currentIndex - 1;
-    const entry = currentHistory[newIndex];
-    if (!entry) return null; // Safety check
-
-    setHistoryIndex(newIndex);
-    historyIndexRef.current = newIndex;
-    lastValueRef.current = entry.value;
-    return entry;
-  }, [enabled]);
-
-  const redo = useCallback((): EditHistoryEntry | null => {
-    const currentIndex = historyIndexRef.current;
-    const currentHistory = historyRef.current;
-
-    if (!enabled || currentIndex >= currentHistory.length - 1) return null;
-
-    const newIndex = currentIndex + 1;
-    const entry = currentHistory[newIndex];
-    if (!entry) return null; // Safety check
-
-    setHistoryIndex(newIndex);
-    historyIndexRef.current = newIndex;
-    lastValueRef.current = entry.value;
-    return entry;
-  }, [enabled]);
-
-  return {
-    pushHistory,
-    undo,
-    redo,
-    canUndo: historyIndex > 0,
-    canRedo: historyIndex < history.length - 1
-  };
-}
+// Internal undo/redo has been removed - use browser's native undo/redo instead.
+// EditSession in EditModeManager now tracks isDirty state.
 
 // =============================================================================
 // Sub-Components
@@ -370,6 +246,7 @@ FunctionHintTooltip.displayName = 'FunctionHintTooltip';
 export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   state,
   actions,
+  manager,
   activeCellAddress,
   activeCellValue = '',
   activeCell,
@@ -383,7 +260,23 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   functionHint,
   enableAutoComplete = true,
 }) => {
-  // Editor styles now in index.css (themed)
+  // =============================================================================
+  // EditSession Subscription (New Pattern - React 18)
+  // =============================================================================
+
+  // Subscribe to EditSession from EditModeManager (single source of truth)
+  const editSession = useSyncExternalStore(
+    manager?.subscribe ?? (() => () => {}), // Subscribe function
+    manager?.getSnapshot ?? (() => null)     // Get current snapshot
+  );
+
+  // TODO: Use editSession for composition state, cursor sync, and dirty tracking
+  // For now, just ensure it's available for future use
+  void editSession;
+
+  // =============================================================================
+  // Refs and Local State
+  // =============================================================================
 
   const inputRef = useRef<HTMLInputElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -392,20 +285,13 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   stateRef.current = state;
   const [isExpanded, setIsExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+
+  // IME composition tracking (TODO: migrate to EditSession.isComposing)
   const isComposingRef = useRef(false);
   const hasCommittedRef = useRef(false);
 
-  // Internal undo/redo history
-  const { pushHistory, undo, redo, canUndo, canRedo } = useEditHistory(
-    state.value,
-    state.isEditing
-  );
-
-  // Refs for canUndo/canRedo to avoid stale closures in handleKeyDown
-  const canUndoRef = useRef(canUndo);
-  canUndoRef.current = canUndo;
-  const canRedoRef = useRef(canRedo);
-  canRedoRef.current = canRedo;
+  // REMOVED: useEditHistory hook - EditSession now tracks isDirty
+  // NOTE: Internal undo/redo removed - use browser's native undo/redo (Ctrl+Z/Ctrl+Y)
 
   // Formula auto-complete hook
   const handleAutoCompleteAccept = useCallback((result: AcceptResult) => {
@@ -490,12 +376,6 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
 
     actions.setValue(newValue);
 
-    // Push to undo history
-    pushHistory({
-      value: newValue,
-      cursorPosition: cursorPos,
-    });
-
     // Check for Point mode trigger (operator typed in a formula)
     if (
       newValue.startsWith('=') &&
@@ -509,7 +389,7 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
         actions.setMode('point');
       }
     }
-  }, [actions, pushHistory]);
+  }, [actions]);
 
   // Handle focus — uses stateRef to avoid re-creating closure on every isEditing change
   const handleFocus = useCallback(() => {
@@ -567,13 +447,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
   const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLInputElement>) => {
     isComposingRef.current = false;
     const value = (e.target as HTMLInputElement).value;
-    const cursorPos = (e.target as HTMLInputElement).selectionStart ?? value.length;
     actions.setValue(value);
-    pushHistory({
-      value,
-      cursorPosition: cursorPos,
-    });
-  }, [actions, pushHistory]);
+  }, [actions]);
 
   // Handle key events - uses refs for IME guard, hasCommittedRef for repeat guard
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -652,46 +527,8 @@ export const FormulaBar: React.FC<FormulaBarProps> = memo(({
           actions.selectAll();
         }
         break;
-
-      case 'z':
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          if (e.shiftKey) {
-            // Ctrl+Shift+Z = Redo
-            if (canRedoRef.current) {
-              const entry = redo();
-              if (entry) {
-                actions.setValue(entry.value);
-                actions.setCursorPosition(entry.cursorPosition);
-              }
-            }
-          } else {
-            // Ctrl+Z = Undo
-            if (canUndoRef.current) {
-              const entry = undo();
-              if (entry) {
-                actions.setValue(entry.value);
-                actions.setCursorPosition(entry.cursorPosition);
-              }
-            }
-          }
-        }
-        break;
-
-      case 'y':
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          if (canRedoRef.current) {
-            const entry = redo();
-            if (entry) {
-              actions.setValue(entry.value);
-              actions.setCursorPosition(entry.cursorPosition);
-            }
-          }
-        }
-        break;
     }
-  }, [actions, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions, undo, redo]);
+  }, [actions, onEnter, onTab, onCancel, autoCompleteState.showSuggestions, autoCompleteActions]);
 
   // Sync selection changes from native input
   const handleSelect = useCallback(() => {

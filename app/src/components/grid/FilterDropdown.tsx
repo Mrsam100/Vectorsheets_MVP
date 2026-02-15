@@ -229,6 +229,18 @@ const FilterDropdownInner: React.FC<FilterDropdownProps> = ({
         </div>
       </div>
 
+      {/* 1000 value cap warning */}
+      {uniqueValues.length >= 1000 && (
+        <div className="filter-dropdown-warning">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 1L13 12H1L7 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M7 5V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            <circle cx="7" cy="10" r="0.5" fill="currentColor"/>
+          </svg>
+          <span>Showing first 1,000 values. Use search to find more.</span>
+        </div>
+      )}
+
       {/* Value list */}
       <div className="filter-dropdown-list">
         {/* Select All */}
@@ -256,7 +268,9 @@ const FilterDropdownInner: React.FC<FilterDropdownProps> = ({
               checked={checkedValues.has(value)}
               onChange={() => toggleValue(value)}
             />
-            <span>{value || '(empty)'}</span>
+            <span className="filter-dropdown-value" title={value || '(empty)'}>
+              {value || '(empty)'}
+            </span>
           </label>
         ))}
 

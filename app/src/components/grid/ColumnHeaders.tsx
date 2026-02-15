@@ -11,13 +11,15 @@
  * Uses same column metrics as CellLayer (from RenderFrame)
  */
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useRef } from 'react';
 import { useGridContext } from './GridContext';
 import { getColumnLabel } from './types';
 import type { ColPosition } from './types';
 
 export interface ColumnHeadersProps {
   className?: string;
+  isColumnFiltered?: (col: number) => boolean;
+  onFilterClick?: (col: number, anchorRect: DOMRect) => void;
 }
 
 /**
@@ -26,14 +28,29 @@ export interface ColumnHeadersProps {
 const ColumnHeader: React.FC<{
   column: ColPosition;
   isSelected: boolean;
+  isFiltered: boolean;
   headerOffset: number;
   onClick?: (col: number, e: React.MouseEvent) => void;
-}> = memo(({ column, isSelected, headerOffset, onClick }) => {
+  onFilterClick?: (col: number, anchorRect: DOMRect) => void;
+}> = memo(({ column, isSelected, isFiltered, headerOffset, onClick, onFilterClick }) => {
+  const headerRef = useRef<HTMLDivElement>(null);
+
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       onClick?.(column.col, e);
     },
     [column.col, onClick]
+  );
+
+  const handleFilterClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (headerRef.current && onFilterClick) {
+        const rect = headerRef.current.getBoundingClientRect();
+        onFilterClick(column.col, rect);
+      }
+    },
+    [column.col, onFilterClick]
   );
 
   // Adjust position - columns come with absolute screen coordinates
@@ -42,7 +59,8 @@ const ColumnHeader: React.FC<{
 
   return (
     <div
-      className="column-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b"
+      ref={headerRef}
+      className="column-header absolute flex items-center justify-center select-none cursor-pointer border-r border-b group"
       style={{
         left: adjustedLeft,
         width: column.width,
@@ -61,6 +79,53 @@ const ColumnHeader: React.FC<{
       aria-selected={isSelected}
     >
       <span className="truncate">{getColumnLabel(column.col)}</span>
+
+      {/* Active filter indicator - always visible when filtered */}
+      {isFiltered && (
+        <svg
+          className="filter-icon-active ml-1"
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-label="Filtered"
+        >
+          <path
+            d="M1 2h10L7 6.5V10L5 11V6.5L1 2z"
+            fill="currentColor"
+            stroke="currentColor"
+            strokeWidth="0.5"
+          />
+        </svg>
+      )}
+
+      {/* Filter dropdown button - visible on hover or when filtered */}
+      {onFilterClick && (
+        <button
+          className="filter-button absolute right-7 top-1/2 -translate-y-1/2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-100 rounded"
+          onClick={handleFilterClick}
+          aria-label={`Filter column ${getColumnLabel(column.col)}`}
+          title="Filter"
+          style={{ zIndex: 5 }}
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M2 3.5L5 6.5L8 3.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
 
       {/* Resize handle - right edge */}
       <div
@@ -86,7 +151,7 @@ ColumnHeader.displayName = 'ColumnHeader';
  * - Contains both frozen and scrollable columns
  */
 export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
-  ({ className = '' }) => {
+  ({ className = '', isColumnFiltered, onFilterClick }) => {
     const { config, frame, isColSelected, onColHeaderClick } = useGridContext();
 
     // Memoize frozen/scrollable column arrays to avoid O(n) filter + allocation per render.
@@ -122,8 +187,10 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
             key={`frozen-col-${column.col}`}
             column={column}
             isSelected={isColSelected(column.col)}
+            isFiltered={isColumnFiltered?.(column.col) ?? false}
             headerOffset={headerOffset}
             onClick={onColHeaderClick}
+            onFilterClick={onFilterClick}
           />
         ))}
 
@@ -133,8 +200,10 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = memo(
             key={`col-${column.col}`}
             column={column}
             isSelected={isColSelected(column.col)}
+            isFiltered={isColumnFiltered?.(column.col) ?? false}
             headerOffset={headerOffset}
             onClick={onColHeaderClick}
+            onFilterClick={onFilterClick}
           />
         ))}
 

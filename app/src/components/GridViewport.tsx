@@ -175,6 +175,8 @@ export interface GridViewportProps {
   onOpenSortDialog?: () => void;
   /** Callback when Filter dropdown should open for a column */
   onOpenFilterDropdown?: (column: number, anchorRect: { x: number; y: number; width: number; height: number }) => void;
+  /** Check if a column has an active filter */
+  isColumnFiltered?: (col: number) => boolean;
   /** Callback when Data Validation dialog should open */
   onOpenDataValidation?: () => void;
 }
@@ -387,6 +389,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
       onOpenFindReplace,
       onOpenSortDialog,
       onOpenFilterDropdown,
+      isColumnFiltered,
       onOpenDataValidation,
     },
     ref
@@ -521,7 +524,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
     }, [getCellValueProp, dimensions]);
 
     // Edit mode hook
-    const { state: editState, actions: editActions } = useEditMode({
+    const { state: editState, actions: editActions, manager: editModeManager } = useEditMode({
       onCommit: (cell, value) => {
         onCommit?.(cell.row, cell.col, value);
       },
@@ -883,7 +886,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
         document.removeEventListener('mouseup', handleMouseUp);
         autoScroll.stop();
       };
-    }, [isDragging, autoScroll]);
+    }, [isDragging]); // autoScroll captured in closure, no need in deps (prevents double-listener bug)
 
     // =========================================================================
     // Cell coordinate lookup
@@ -1362,6 +1365,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
           <FormulaBar
             state={editState}
             actions={editActions}
+            manager={editModeManager}
             activeCellAddress={activeCellAddress}
             activeCellValue={activeCellValue}
             activeCell={activeCell}
@@ -1382,7 +1386,12 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
             }}
           >
             <CornerCell />
-            <ColumnHeaders />
+            <ColumnHeaders
+              isColumnFiltered={isColumnFiltered}
+              onFilterClick={onOpenFilterDropdown ? (col, rect) => {
+                onOpenFilterDropdown(col, { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+              } : undefined}
+            />
             <RowHeaders />
 
             <div
@@ -1450,6 +1459,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
                   <CellEditorOverlay
                     state={editState}
                     actions={editActions}
+                    manager={editModeManager}
                     cellPosition={editorPosition}
                     isMergedCell={isEditingMergedCell}
                     onEnter={handleEnterNavigation}
