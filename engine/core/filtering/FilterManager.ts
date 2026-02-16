@@ -5,7 +5,6 @@
 
 import type { FilterPredicate, SerializedPredicate, CellValue } from './types.js';
 import { deserializePredicate } from './FilterPredicate.js';
-import type { CellRef } from '../types/index.js';
 
 /**
  * Column filter state

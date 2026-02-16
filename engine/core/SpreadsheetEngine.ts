@@ -39,6 +39,12 @@ import {
 import { CommentStore } from './comments/CommentStore.js';
 import { FilterManager, type FilterDataSource } from './filtering/FilterManager.js';
 import type { FilterPredicate } from './filtering/types.js';
+import { UndoRedoManager } from './history/UndoRedoManager.js';
+import {
+  ApplyFilterCommand,
+  ClearFilterCommand,
+  ClearAllFiltersCommand,
+} from './filtering/FilterCommands.js';
 
 export interface SpreadsheetEngineConfig {
   /** Initial viewport dimensions */
@@ -109,6 +115,7 @@ export class SpreadsheetEngine {
   private keyboardHandler: KeyboardHandler;
   private commentStore: CommentStore;
   private filterManager: FilterManager;
+  private undoRedoManager: UndoRedoManager;
 
   // Configuration
   private config: Required<SpreadsheetEngineConfig>;
@@ -149,6 +156,11 @@ export class SpreadsheetEngine {
       getUsedRange: () => this.dataStore.getUsedRange(),
     };
     this.filterManager = new FilterManager(filterDataSource);
+
+    // Initialize undo/redo manager
+    this.undoRedoManager = new UndoRedoManager({
+      maxHistory: 100, // Keep last 100 operations
+    });
 
     // Initialize virtual renderer with filter-aware dimension provider
     const filteredDimensions = new FilteredDimensionProvider(
@@ -753,6 +765,13 @@ export class SpreadsheetEngine {
     return this.filterManager;
   }
 
+  /**
+   * Get the undo/redo manager for managing operation history.
+   */
+  getUndoRedoManager(): UndoRedoManager {
+    return this.undoRedoManager;
+  }
+
   // ===========================================================================
   // Filter Operations
   // ===========================================================================
@@ -780,6 +799,33 @@ export class SpreadsheetEngine {
    */
   clearAllFilters(): void {
     this.filterManager.clearAllFilters();
+  }
+
+  /**
+   * Apply a filter to a column with undo/redo support
+   * @param column - Column index (0-based)
+   * @param predicate - Filter predicate to apply
+   */
+  applyFilterWithUndo(column: number, predicate: FilterPredicate): void {
+    const command = new ApplyFilterCommand(this.filterManager, column, predicate);
+    this.undoRedoManager.execute(command);
+  }
+
+  /**
+   * Clear filter from a specific column with undo/redo support
+   * @param column - Column index (0-based)
+   */
+  clearFilterWithUndo(column: number): void {
+    const command = new ClearFilterCommand(this.filterManager, column);
+    this.undoRedoManager.execute(command);
+  }
+
+  /**
+   * Clear all active filters with undo/redo support
+   */
+  clearAllFiltersWithUndo(): void {
+    const command = new ClearAllFiltersCommand(this.filterManager);
+    this.undoRedoManager.execute(command);
   }
 
   /**

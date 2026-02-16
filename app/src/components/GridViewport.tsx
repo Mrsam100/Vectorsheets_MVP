@@ -177,6 +177,8 @@ export interface GridViewportProps {
   onOpenFilterDropdown?: (column: number, anchorRect: { x: number; y: number; width: number; height: number }) => void;
   /** Check if a column has an active filter */
   isColumnFiltered?: (col: number) => boolean;
+  /** Callback when all filters should be cleared (Ctrl+Shift+L) */
+  onClearAllFilters?: () => void;
   /** Callback when Data Validation dialog should open */
   onOpenDataValidation?: () => void;
 }
@@ -390,6 +392,7 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
       onOpenSortDialog,
       onOpenFilterDropdown,
       isColumnFiltered,
+      onClearAllFilters,
       onOpenDataValidation,
     },
     ref
@@ -1126,6 +1129,58 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
         return () => container.removeEventListener('keydown', handleKeyDown);
       }
     }, [zoomIn, zoomOut, resetZoom, editState.isEditing]);
+
+    // Keyboard shortcut: Alt+Down to open filter dropdown on active column
+    useEffect(() => {
+      const handleFilterShortcut = (e: KeyboardEvent) => {
+        // Alt+Down or Alt+ArrowDown
+        if (e.altKey && e.key === 'ArrowDown' && !editState.isEditing && onOpenFilterDropdown) {
+          e.preventDefault();
+
+          // Get active cell column
+          const activeCol = selection.activeCell?.col;
+          if (activeCol === undefined || activeCol === null) return;
+
+          // Find column header element to get its position
+          const columnHeader = containerRef.current?.querySelector(
+            `.column-header[aria-colindex="${activeCol + 1}"]`
+          ) as HTMLElement;
+
+          if (columnHeader) {
+            const rect = columnHeader.getBoundingClientRect();
+            onOpenFilterDropdown(activeCol, {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            });
+          }
+        }
+      };
+
+      const container = containerRef.current;
+      if (container) {
+        container.addEventListener('keydown', handleFilterShortcut);
+        return () => container.removeEventListener('keydown', handleFilterShortcut);
+      }
+    }, [selection.activeCell, editState.isEditing, onOpenFilterDropdown]);
+
+    // Keyboard shortcut: Ctrl+Shift+L to clear all filters
+    useEffect(() => {
+      const handleClearFiltersShortcut = (e: KeyboardEvent) => {
+        // Ctrl+Shift+L or Cmd+Shift+L (Excel-compatible)
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'L' && !editState.isEditing && onClearAllFilters) {
+          e.preventDefault();
+          onClearAllFilters();
+        }
+      };
+
+      const container = containerRef.current;
+      if (container) {
+        container.addEventListener('keydown', handleClearFiltersShortcut);
+        return () => container.removeEventListener('keydown', handleClearFiltersShortcut);
+      }
+    }, [editState.isEditing, onClearAllFilters]);
 
     // =========================================================================
     // Context Menu

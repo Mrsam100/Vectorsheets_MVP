@@ -38,7 +38,11 @@ import {
   TextEqualsPredicate,
   OrPredicate,
   IsEmptyPredicate,
-} from '../../../engine/core/filtering/FilterPredicate';
+  ApplyFilterCommand,
+  ClearFilterCommand,
+  ClearAllFiltersCommand,
+} from '../../../engine/core/filtering';
+import type { UndoRedoManager } from '../../../engine/core/history/UndoRedoManager';
 
 // =============================================================================
 // Types
@@ -77,6 +81,8 @@ export interface UseFilterStateOptions {
   filterManager: FilterManager;
   /** Data store for scanning unique values */
   dataStore: FilterDataStore;
+  /** Undo/redo manager for undo support (optional) */
+  undoRedoManager?: UndoRedoManager;
 }
 
 /**
@@ -198,7 +204,7 @@ export function predicateToValueSet(
  * Subscribes to FilterManager changes and manages filter UI state.
  */
 export function useFilterState(options: UseFilterStateOptions): UseFilterStateResult {
-  const { filterManager, dataStore } = options;
+  const { filterManager, dataStore, undoRedoManager } = options;
 
   // --- React 18 Subscription to FilterManager ---
   // Subscribe to filter changes - triggers re-render when filters change
@@ -307,7 +313,12 @@ export function useFilterState(options: UseFilterStateOptions): UseFilterStateRe
       // Edge case: No predicates means no filter (shouldn't happen with UI validation)
       if (predicates.length === 0) {
         // Clear filter instead
-        filterManager.clearFilter(column);
+        if (undoRedoManager) {
+          const cmd = new ClearFilterCommand(filterManager, column);
+          undoRedoManager.execute(cmd);
+        } else {
+          filterManager.clearFilter(column);
+        }
         closeFilter();
         return;
       }
@@ -318,29 +329,44 @@ export function useFilterState(options: UseFilterStateOptions): UseFilterStateRe
           ? predicates[0] // Single predicate
           : new OrPredicate(predicates); // Multiple predicates → OR
 
-      // Apply to FilterManager
-      filterManager.applyFilter(column, predicate);
+      // Apply to FilterManager (with undo support if available)
+      if (undoRedoManager) {
+        const cmd = new ApplyFilterCommand(filterManager, column, predicate);
+        undoRedoManager.execute(cmd);
+      } else {
+        filterManager.applyFilter(column, predicate);
+      }
 
       // Close dropdown
       closeFilter();
     },
-    [filterManager, closeFilter]
+    [filterManager, undoRedoManager, closeFilter]
   );
 
   // --- Clear Filter ---
   const clearFilter = useCallback(
     (column: number) => {
-      filterManager.clearFilter(column);
+      if (undoRedoManager) {
+        const cmd = new ClearFilterCommand(filterManager, column);
+        undoRedoManager.execute(cmd);
+      } else {
+        filterManager.clearFilter(column);
+      }
       closeFilter();
     },
-    [filterManager, closeFilter]
+    [filterManager, undoRedoManager, closeFilter]
   );
 
   // --- Clear All Filters ---
   const clearAllFilters = useCallback(() => {
-    filterManager.clearAllFilters();
+    if (undoRedoManager) {
+      const cmd = new ClearAllFiltersCommand(filterManager);
+      undoRedoManager.execute(cmd);
+    } else {
+      filterManager.clearAllFilters();
+    }
     closeFilter();
-  }, [filterManager, closeFilter]);
+  }, [filterManager, undoRedoManager, closeFilter]);
 
   // --- Helper: Is Column Filtered? ---
   const isColumnFiltered = useCallback(

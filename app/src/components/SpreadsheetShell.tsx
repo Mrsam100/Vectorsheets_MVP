@@ -38,6 +38,7 @@ import { useOnboarding } from '../hooks/useOnboarding';
 import { useFilterState, predicateToValueSet } from '../hooks/useFilterState';
 import type { FilterDataStore } from '../hooks/useFilterState';
 import type { FilterManager } from '../../../engine/core/filtering/FilterManager';
+import type { UndoRedoManager } from '../../../engine/core/history/UndoRedoManager';
 import { DEFAULT_RIBBON_STATE, type RibbonState } from './ribbon';
 import type { SheetTabInfo } from './SheetTabs';
 import type { SpreadsheetIntent } from './grid/IntentHandler';
@@ -82,6 +83,8 @@ export interface SpreadsheetShellProps {
   filterManager?: FilterManager;
   /** Data store from engine (for filter UI integration) */
   dataStore?: FilterDataStore;
+  /** Undo/redo manager from engine (for filter undo support) */
+  undoRedoManager?: UndoRedoManager;
 }
 
 // =============================================================================
@@ -97,6 +100,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   onFormatPainterToggle,
   filterManager,
   dataStore,
+  undoRedoManager,
 }) => {
   const gridRef = useRef<GridViewportHandle>(null);
   const selectionRef = useRef<SelectionState>({ activeCell: { row: 0, col: 0 }, ranges: [] });
@@ -509,7 +513,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
 
   // Integrate useFilterState if engine props provided, otherwise use stubs
   const filterState = filterManager && dataStore
-    ? useFilterState({ filterManager, dataStore })
+    ? useFilterState({ filterManager, dataStore, undoRedoManager })
     : null;
 
   const handleOpenFilterDropdown = useCallback((column: number, anchorRect: { x: number; y: number; width: number; height: number }) => {
@@ -557,6 +561,15 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
       gridRef.current?.focus();
     }
   }, [filterState]);
+
+  const handleClearAllFilters = useCallback(() => {
+    if (filterState) {
+      filterState.clearAllFilters();
+      gridRef.current?.refresh();
+      gridRef.current?.focus();
+      toast('All filters cleared', 'success');
+    }
+  }, [filterState, toast]);
 
   // =========================================================================
   // Data Validation Dialog State & Callbacks
@@ -679,6 +692,7 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
           onOpenSortDialog={handleOpenSortDialog}
           onOpenFilterDropdown={handleOpenFilterDropdown}
           isColumnFiltered={filterState?.isColumnFiltered}
+          onClearAllFilters={filterState ? handleClearAllFilters : undefined}
           onOpenDataValidation={handleOpenDataValidation}
         />
       </main>
@@ -760,6 +774,9 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
         onRenameSheet={handleRenameSheet}
         onDeleteSheet={handleDeleteSheet}
         onReorderSheet={handleReorderSheet}
+        totalRows={filterState?.getTotalRowCount()}
+        filteredRows={filterState?.getFilteredRowCount()}
+        onClearAllFilters={filterState ? handleClearAllFilters : undefined}
       />
 
       {/* Keyboard Shortcuts Dialog */}

@@ -42,6 +42,12 @@ export interface StatusBarProps {
   onDeleteSheet?: (id: string) => void;
   /** Reorder a sheet */
   onReorderSheet?: (id: string, newIndex: number) => void;
+  /** Filter state: total rows (undefined if no data) */
+  totalRows?: number;
+  /** Filter state: filtered rows (undefined if no filters active) */
+  filteredRows?: number;
+  /** Clear all filters handler */
+  onClearAllFilters?: () => void;
 }
 
 const ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
@@ -70,6 +76,9 @@ const StatusBarInner: React.FC<StatusBarProps> = ({
   onRenameSheet,
   onDeleteSheet,
   onReorderSheet,
+  totalRows,
+  filteredRows,
+  onClearAllFilters,
 }) => {
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const zoomContainerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +146,44 @@ const StatusBarInner: React.FC<StatusBarProps> = ({
           {currentMode.text}
         </span>
       </div>
+
+      {/* Filter Indicator */}
+      {totalRows !== undefined && filteredRows !== undefined && filteredRows < totalRows && (
+        <>
+          <div className="statusbar-divider w-px h-4 mr-3" />
+          <div className="flex items-center gap-2 mr-4">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="flex-shrink-0"
+              style={{ color: '#2563eb' }}
+            >
+              <path
+                d="M1 2h10L7 6.5V10L5 11V6.5L1 2z"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="0.5"
+              />
+            </svg>
+            <span className="font-medium">
+              {filteredRows.toLocaleString()} of {totalRows.toLocaleString()} rows
+            </span>
+            {onClearAllFilters && (
+              <button
+                type="button"
+                className="statusbar-clear-filters-btn px-1.5 py-0.5 rounded text-xs hover:bg-gray-100 transition-colors"
+                onClick={onClearAllFilters}
+                title="Clear all filters (Ctrl+Shift+L)"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Spacer */}
       <div className="flex-1" />
