@@ -216,6 +216,75 @@ export class FilterManager {
   }
 
   /**
+   * Get all rows regardless of filters (escape hatch)
+   *
+   * This method returns ALL rows in the used range, ignoring any active filters.
+   * Use cases:
+   * - Charts that should display all data even when filters are active
+   * - Exports that include hidden rows
+   * - "Show hidden data" feature (Excel compatibility)
+   *
+   * For filtered rows, use getFilteredRows() instead.
+   * For conditional access, use getRows(includeHidden).
+   *
+   * @returns Set of all row indices in used range
+   * @example
+   * ```typescript
+   * // Get all rows for chart that shows hidden data
+   * const chartData = filterManager.getAllRows();
+   *
+   * // Compare filtered vs total
+   * const visible = filterManager.getFilteredRows().size;
+   * const total = filterManager.getAllRows().size;
+   * console.log(`Showing ${visible} of ${total} rows`);
+   * ```
+   */
+  getAllRows(): Set<number> {
+    const allRows = new Set<number>();
+    const usedRange = this.dataSource.getUsedRange();
+
+    for (let row = usedRange.startRow; row <= usedRange.endRow; row++) {
+      allRows.add(row);
+    }
+
+    return allRows;
+  }
+
+  /**
+   * Get rows with optional filter bypass (Excel-compatible API)
+   *
+   * Convenience method that returns either all rows or filtered rows
+   * based on the includeHidden parameter. Equivalent to Excel's
+   * "Show data in hidden rows and columns" feature.
+   *
+   * @param includeHidden - If true, returns all rows (escape hatch). If false, returns filtered rows.
+   * @returns Set of row indices
+   * @example
+   * ```typescript
+   * // Chart with "Show hidden data" checkbox
+   * const showHiddenData = chartConfig.showHiddenRows;
+   * const chartData = filterManager.getRows(showHiddenData);
+   *
+   * // Equivalent to:
+   * const chartData = showHiddenData
+   *   ? filterManager.getAllRows()
+   *   : filterManager.getFilteredRows();
+   * ```
+   */
+  getRows(includeHidden: boolean = false): Set<number> {
+    return includeHidden ? this.getAllRows() : this.getFilteredRows();
+  }
+
+  /**
+   * Get count of all rows (regardless of filters)
+   * @returns Total number of rows in used range
+   */
+  getTotalRowCount(): number {
+    const usedRange = this.dataSource.getUsedRange();
+    return usedRange.endRow - usedRange.startRow + 1;
+  }
+
+  /**
    * Invalidate cached filtered rows
    * Call this when data changes
    */

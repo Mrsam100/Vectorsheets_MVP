@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { SpreadsheetShell } from './components';
+import { SpreadsheetContainer } from './components';
 import { ThemeProvider } from './components/ThemeProvider';
 import { ToastProvider } from './components/ToastProvider';
 import './styles/index.css';
@@ -137,7 +137,7 @@ const App: React.FC = () => {
       <ThemeProvider>
         <ToastProvider>
           <div className="app h-screen w-screen overflow-hidden">
-            <SpreadsheetShell />
+            <SpreadsheetContainer />
           </div>
         </ToastProvider>
       </ThemeProvider>

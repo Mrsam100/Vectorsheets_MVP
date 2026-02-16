@@ -46,6 +46,7 @@ import type { SelectionState } from './grid';
 import type { CellFormat } from '../../../engine/core/types/index';
 import type { FindOptions } from '../../../engine/core/operations/FindReplace';
 import { A11yProvider } from './A11yProvider';
+import type { DimensionProvider } from '../../../engine/core/rendering/VirtualRenderer';
 
 // =============================================================================
 // Utilities
@@ -69,6 +70,12 @@ function columnIndexToName(col: number): string {
 export interface SpreadsheetShellProps {
   /** Optional class name for the shell container */
   className?: string;
+  /** Dimension provider for cell rendering */
+  dimensionProvider?: DimensionProvider;
+  /** Called when cell value is committed */
+  onCommit?: (row: number, col: number, value: string) => void;
+  /** Get cell value at position */
+  getCellValue?: (row: number, col: number) => string;
   /** Called when ribbon requests format application */
   onApplyFormat?: (format: Partial<CellFormat>, selection: SelectionState) => void;
   /** Called when ribbon requests undo/redo */
@@ -93,6 +100,9 @@ export interface SpreadsheetShellProps {
 
 export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
   className = '',
+  dimensionProvider,
+  onCommit,
+  getCellValue,
   onApplyFormat,
   onUndoRedo,
   onClipboard,
@@ -675,6 +685,9 @@ export const SpreadsheetShell: React.FC<SpreadsheetShellProps> = ({
       <main id="grid-main" tabIndex={-1} className="flex-1 min-h-0 relative">
         <GridViewport
           ref={gridRef}
+          dimensionProvider={dimensionProvider}
+          onCommit={onCommit}
+          getCellValue={getCellValue}
           onActiveCellChange={handleActiveCellChange}
           onSelectionChange={handleSelectionChange}
           onInsertRows={handleInsertRows}

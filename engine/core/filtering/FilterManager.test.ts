@@ -364,6 +364,192 @@ describe('FilterManager - Filtered Row Calculation', () => {
       expect(manager.getVisibleRowCount()).toBe(2);
     });
   });
+
+  describe('getAllRows - Escape Hatch', () => {
+    it('should return all rows regardless of filters', () => {
+      // Setup data
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(2, 0, 'apricot');
+      dataSource.setCell(3, 0, 'cherry');
+
+      // Apply filter that hides some rows
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+
+      // getFilteredRows should return only 2 rows (apple, apricot)
+      const filteredRows = manager.getFilteredRows();
+      expect(filteredRows.size).toBe(2);
+      expect(filteredRows.has(0)).toBe(true); // apple
+      expect(filteredRows.has(2)).toBe(true); // apricot
+
+      // getAllRows should return ALL 4 rows (escape hatch)
+      const allRows = manager.getAllRows();
+      expect(allRows.size).toBe(4);
+      expect(allRows.has(0)).toBe(true); // apple
+      expect(allRows.has(1)).toBe(true); // banana (hidden but included)
+      expect(allRows.has(2)).toBe(true); // apricot
+      expect(allRows.has(3)).toBe(true); // cherry (hidden but included)
+    });
+
+    it('should return all rows when no filters active', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(2, 0, 'cherry');
+
+      // No filters applied
+      const allRows = manager.getAllRows();
+      expect(allRows.size).toBe(3);
+      expect(allRows.has(0)).toBe(true);
+      expect(allRows.has(1)).toBe(true);
+      expect(allRows.has(2)).toBe(true);
+    });
+
+    it('should return empty set when no data', () => {
+      // MockDataSource with no cells has maxRow=0, which means row 0 exists
+      // In a real spreadsheet, getUsedRange() would return startRow=0, endRow=-1 for empty
+      // But for this test, we expect 1 row (row 0) based on MockDataSource implementation
+      const allRows = manager.getAllRows();
+      expect(allRows.size).toBe(1); // Row 0 exists (MockDataSource default)
+      expect(allRows.has(0)).toBe(true);
+    });
+
+    it('should work with multi-column filters', () => {
+      // Setup data
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(0, 1, 15);
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(1, 1, 5);
+      dataSource.setCell(2, 0, 'apricot');
+      dataSource.setCell(2, 1, 20);
+
+      // Apply multi-column filters (only apple and apricot pass both)
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+      manager.applyFilter(1, new NumberGreaterThanPredicate(10));
+
+      const filteredRows = manager.getFilteredRows();
+      expect(filteredRows.size).toBe(2); // apple, apricot
+
+      // getAllRows still returns all 3
+      const allRows = manager.getAllRows();
+      expect(allRows.size).toBe(3);
+      expect(allRows.has(1)).toBe(true); // banana (hidden but included)
+    });
+
+    it('should return new Set instance each time (not cached)', () => {
+      dataSource.setCell(0, 0, 'test');
+      dataSource.setCell(1, 0, 'test2');
+
+      const allRows1 = manager.getAllRows();
+      const allRows2 = manager.getAllRows();
+
+      // Different instances (not cached like getFilteredRows)
+      expect(allRows1).not.toBe(allRows2);
+      // But same content
+      expect(allRows1.size).toBe(allRows2.size);
+    });
+  });
+
+  describe('getRows - Conditional Access', () => {
+    it('should return filtered rows when includeHidden=false', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(2, 0, 'apricot');
+
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+
+      const rows = manager.getRows(false);
+      expect(rows.size).toBe(2); // Only apple, apricot
+      expect(rows.has(1)).toBe(false); // banana hidden
+    });
+
+    it('should return all rows when includeHidden=true', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(2, 0, 'apricot');
+
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+
+      const rows = manager.getRows(true);
+      expect(rows.size).toBe(3); // All rows including banana
+      expect(rows.has(1)).toBe(true); // banana included
+    });
+
+    it('should default to filtered rows (includeHidden=false)', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+
+      // No argument = includeHidden defaults to false
+      const rows = manager.getRows();
+      expect(rows.size).toBe(1); // Only apple
+      expect(rows).toEqual(manager.getFilteredRows());
+    });
+
+    it('should work with no filters (both modes return same)', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+
+      const filteredRows = manager.getRows(false);
+      const allRows = manager.getRows(true);
+
+      expect(filteredRows.size).toBe(2);
+      expect(allRows.size).toBe(2);
+      // When no filters, both should be equivalent
+      expect([...filteredRows].sort()).toEqual([...allRows].sort());
+    });
+
+    it('should be Excel-compatible (mimics "Show hidden data")', () => {
+      // Simulate Excel chart with "Show data in hidden rows" checkbox
+      dataSource.setCell(0, 0, 'Q1');
+      dataSource.setCell(0, 1, 100);
+      dataSource.setCell(1, 0, 'Q2');
+      dataSource.setCell(1, 1, 200);
+      dataSource.setCell(2, 0, 'Q3');
+      dataSource.setCell(2, 1, 150);
+
+      // User filters to show only Q1 and Q3
+      manager.applyFilter(0, new TextContainsPredicate('Q1'));
+
+      // Chart config: showHiddenRows = false (default)
+      let chartData = manager.getRows(false);
+      expect(chartData.size).toBe(1); // Only Q1
+
+      // User checks "Show data in hidden rows"
+      chartData = manager.getRows(true);
+      expect(chartData.size).toBe(3); // Q1, Q2, Q3 (all data)
+    });
+  });
+
+  describe('getTotalRowCount', () => {
+    it('should return total row count regardless of filters', () => {
+      dataSource.setCell(0, 0, 'apple');
+      dataSource.setCell(1, 0, 'banana');
+      dataSource.setCell(2, 0, 'apricot');
+      dataSource.setCell(3, 0, 'cherry');
+
+      // Apply filter
+      manager.applyFilter(0, new TextContainsPredicate('ap'));
+
+      expect(manager.getTotalRowCount()).toBe(4); // Total rows
+      expect(manager.getVisibleRowCount()).toBe(2); // Filtered rows
+    });
+
+    it('should return 1 when no data (row 0 exists)', () => {
+      // MockDataSource with no cells has maxRow=0, so row 0 exists
+      expect(manager.getTotalRowCount()).toBe(1);
+    });
+
+    it('should match getAllRows().size', () => {
+      dataSource.setCell(0, 0, 'test1');
+      dataSource.setCell(1, 0, 'test2');
+      dataSource.setCell(2, 0, 'test3');
+
+      manager.applyFilter(0, new TextContainsPredicate('test1'));
+
+      expect(manager.getTotalRowCount()).toBe(manager.getAllRows().size);
+    });
+  });
 });
 
 // ===========================================================================

@@ -123,6 +123,10 @@ export class SpreadsheetEngine {
   // Event callbacks
   private events: SpreadsheetEngineEvents = {};
 
+  // React 18 subscription pattern (for useSyncExternalStore)
+  private version = 0;
+  private listeners = new Set<() => void>();
+
   constructor(config: SpreadsheetEngineConfig = {}) {
     // Merge with defaults
     this.config = {
@@ -293,6 +297,7 @@ export class SpreadsheetEngine {
 
     // Notify listeners
     this.events.onCellChange?.(row, col, cell);
+    this.notifyListeners(); // React 18 subscription
   }
 
   /**
@@ -344,6 +349,7 @@ export class SpreadsheetEngine {
     }
     cell.format = { ...cell.format, ...format };
     this.dataStore.setCell(row, col, cell);
+    this.notifyListeners(); // React 18 subscription
   }
 
   // ===========================================================================
@@ -770,6 +776,39 @@ export class SpreadsheetEngine {
    */
   getUndoRedoManager(): UndoRedoManager {
     return this.undoRedoManager;
+  }
+
+  // ===========================================================================
+  // React 18 Subscription (useSyncExternalStore)
+  // ===========================================================================
+
+  /**
+   * Subscribe to engine state changes (React 18 pattern)
+   * @param listener - Callback to invoke when state changes
+   * @returns Unsubscribe function
+   */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Get current version number (for useSyncExternalStore)
+   * Increments on every state change
+   */
+  getVersion(): number {
+    return this.version;
+  }
+
+  /**
+   * Notify all subscribers of state change
+   * @private
+   */
+  private notifyListeners(): void {
+    this.version++;
+    this.listeners.forEach(fn => fn());
   }
 
   // ===========================================================================

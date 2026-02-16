@@ -4,6 +4,7 @@
  * Export all components from a single entry point.
  */
 
+export { SpreadsheetContainer } from './SpreadsheetContainer';
 export { SpreadsheetShell } from './SpreadsheetShell';
 export type { SpreadsheetShellProps } from './SpreadsheetShell';
 

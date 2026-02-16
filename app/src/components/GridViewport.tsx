@@ -431,6 +431,13 @@ export const GridViewport = memo(forwardRef<GridViewportHandle, GridViewportProp
     const [frame, setFrame] = useState<RenderFrame | null>(null);
     const [renderKey, setRenderKey] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
+
+    // CRITICAL FIX: Force VirtualRenderer refresh when dimensionProvider changes
+    // This ensures fresh cell data is rendered immediately after engine updates
+    useEffect(() => {
+      console.log('[GridViewport] 🔄 dimensionProvider changed, incrementing renderKey');
+      setRenderKey(k => k + 1);
+    }, [dimensionProvider]);
     // Fill source range: captured at BeginFillDrag for dashed target preview
     const [fillSourceRange, setFillSourceRange] = useState<SelectionRange | null>(null);
     // Hover cell: tracked only when format painter is active
